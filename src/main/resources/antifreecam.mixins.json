@@ -1,0 +1,38 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "io.github.sanchous327.antifreecam.mixin",
+  "compatibilityLevel": "JAVA_25",
+  "mixinextras": {
+    "minVersion": "0.5.0"
+  },
+  "mixins": [
+    "blocks.BlockEntityInfoAccessor",
+    "blocks.BlockPacketFilterMixin",
+    "blocks.BlockRevealTickMixin",
+    "blocks.ChunkAccessMixin",
+    "blocks.ClientboundBundlePacketMixin",
+    "blocks.ClientboundChunkBatchStartPacketAccessor",
+    "blocks.ClientboundChunkBatchStartPacketMixin",
+    "blocks.ClientboundLevelChunkPacketDataMixin",
+    "blocks.ClientboundLevelChunkWithLightPacketMixin",
+    "blocks.ConnectionMixin",
+    "blocks.LevelChunkSectionMixin",
+    "blocks.LevelMixin",
+    "blocks.PalettedContainer$DataMixin",
+    "blocks.PalettedContainerMixin",
+    "blocks.PlayerChunkSenderMixin",
+    "blocks.SerializableChunkDataMixin",
+    "blocks.ServerLevelMixin",
+    "blocks.ServerPlayerGameModeMixin",
+    "culling.ChunkMapMixin",
+    "culling.LevelMixin",
+    "culling.ServerLevelMixin",
+    "culling.ServerPlayerMixin",
+    "culling.ServerWaypointManagerMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1,
+    "maxShiftBy": 1
+  }
+}

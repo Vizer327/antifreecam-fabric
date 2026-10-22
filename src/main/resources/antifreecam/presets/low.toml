@@ -1,0 +1,8 @@
+# Low: lowest cost. Storage/workstation blocks and the usual base entities are hidden, terrain is sent as is.
+[entities]
+mode = "blacklist"
+
+[blocks]
+mode = "blacklist"
+scope = "everywhere"
+fill-pockets = false

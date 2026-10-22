@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "id": "antifreecam",
+  "version": "${version}",
+  "name": "AntiFreecam Fabric",
+  "description": "Server-side anti-freecam / anti-ESP: players, entities and blocks a player can't actually see are not sent to him.",
+  "authors": [
+    "Sanchous_327"
+  ],
+  "contributors": [
+    "pianoman911, booky10 (PlayerCulling)",
+    "DrexHD (AntiXray)",
+    "LogisticsCraft (OcclusionCulling)"
+  ],
+  "license": "AGPL-3.0-or-later",
+  "environment": "server",
+  "entrypoints": {
+    "main": [
+      "io.github.sanchous327.antifreecam.AntiFreecam"
+    ]
+  },
+  "mixins": [
+    "antifreecam.mixins.json"
+  ],
+  "accessWidener": "antifreecam.accesswidener",
+  "depends": {
+    "fabricloader": ">=0.18.4",
+    "minecraft": "${minecraftVersion}",
+    "java": ">=25",
+    "fabric-api": "*"
+  },
+  "breaks": {
+    "playerculling": "*",
+    "playerculling-mc263": "*",
+    "antixray": "*"
+  }
+}

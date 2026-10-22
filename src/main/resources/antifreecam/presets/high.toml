@@ -1,0 +1,24 @@
+# High: line of sight only (no name tag rule), locator bar shows only visible players, every closed underground
+# room and the inside of every building is filled with stone, and underground only plain stone and deepslate count
+# as natural - everything else is hidden until seen.
+[players]
+nametag-visibility-distance = 0.0
+waypoint-mode = "CULLED_AZIMUTH"
+
+[blocks]
+fill-pockets = true
+fill-empty-pockets = true
+fill-builds = true
+fill-max-pocket = 32768
+# only plain stone and deepslate count as natural: every other block underground (granite, diorite, andesite,
+# tuff, dirt, gravel, ores, plants...) is hidden until seen - buildings made of natural blocks disappear too
+visible = ["stone", "deepslate", "bedrock", "water", "lava", "bubble_column"]
+
+# The Nether is all "under the roof" and the End has no ground layer - closed-pocket search stays off there
+[worlds."minecraft:the_nether".blocks]
+fill-empty-pockets = false
+fill-builds = false
+
+[worlds."minecraft:the_end".blocks]
+fill-empty-pockets = false
+fill-builds = false

@@ -1,0 +1,159 @@
+# AntiFreecam Fabric
+# Server-side protection against freecam, ESP and X-ray: what a player can't actually see is not sent to his client.
+#
+# Pick a preset, then override single settings below by removing the "# " in front of them.
+#   "low"    - hides storage/workstation blocks and the usual base entities (mobs, frames, armor stands, items).
+#              Lowest cost.
+#   "medium" - underground everything that isn't natural terrain is hidden until seen (bases, mineshafts, ores),
+#              all entities. The commented values below are this preset.
+#   "high"   - like medium, plus: line of sight only (no name tag rule), the locator bar shows only visible
+#              players, closed rooms and the inside of buildings are filled with stone, and underground only
+#              plain stone and deepslate stay visible - everything else is hidden until seen.
+# The Nether and the End use blacklist block hiding in every preset (fortresses and end cities stay visible).
+#
+# /antifreecam reload applies the preset and [players], [entities], [scheduler] right away.
+# [blocks], [ore-engine] and [worlds] are read when a world loads - restart the server after changing them.
+#
+# Players with the permission "antifreecam.bypass" (LuckPerms etc.) see everything. Operators do NOT bypass.
+
+preset = "medium"
+
+[players]
+# Hide players from each other when there is no line of sight between their eyes
+# enabled = true
+# A player whose name tag the viewer could see and who isn't sneaking stays visible up to this distance (blocks),
+# so name tags don't flicker behind thin walls. Freecam does see such players - 0 = strict (line of sight only).
+# nametag-visibility-distance = 64.0
+# Viewers with this scoreboard tag see everyone (cutscenes, minigames, boss fights). "" = off
+# exempt-tag = ""
+# Locator bar (waypoints) of players:
+#   "VANILLA"        - unchanged (the bar shows everyone, even hidden players)
+#   "CULLED_AZIMUTH" - only players this viewer can see
+#   "AZIMUTH"        - direction only, for everyone
+#   "HIDDEN"         - nobody on the bar
+# waypoint-mode = "VANILLA"
+# Worlds where nothing is hidden (players, entities and blocks), e.g. ["minecraft:the_end"]
+# disabled-worlds = []
+
+[entities]
+# Which non-player entities are hidden behind walls:
+#   "whitelist" - everything except technical entities (displays, markers, interactions, leash knots, lightning,
+#                 tridents) - mobs, animals, villagers, item frames, armor stands, minecarts, dropped items, ...
+#   "blacklist" - only monsters, villagers, animals, golems, allays, item frames, armor stands, paintings,
+#                 minecarts, boats, ender pearls, arrows and dropped items
+#   "off"       - entities are not hidden
+# mode = "whitelist"
+# Entities farther than this from every player are not checked (blocks). Viewers farther than this don't get them.
+# cull-distance = 160.0
+# Closer than this an entity is always visible (blocks)
+# always-visible-distance = 6.0
+# true: entities with any scoreboard tag (datapack bosses, scenes, custom mechanics) are never hidden
+# never-hide-tagged = false
+# Tags that don't count for never-hide-tagged (tags your datapacks put on ordinary mobs)
+# ignored-tags = []
+
+[scheduler]
+# Culling threads, 0 = a third of the CPU cores
+# max-threads = 0
+# Seconds between cleanups of idle culling threads
+# cleanup-interval = 30
+# Seconds an empty culling thread is kept
+# container-ttl = 30
+# Milliseconds per culling pass before players are moved to another thread
+# max-cull-time = 45
+# max-transfer-factor = 0.7
+# max-merge-factor = 0.5
+
+[blocks]
+# Hide blocks until the player can see them (raytraced from his eyes). A hidden block is sent as its most common
+# neighbour (a chest in a wall looks like the wall), its data (sign text, chest contents type) is not sent at all.
+# Placing, breaking, opening (chest lids), cracks, break particles and block sounds of a hidden block are filtered too.
+# enabled = true
+# "whitelist" - hide EVERYTHING except the natural blocks in "visible" (finds bases, mineshafts, ores...)
+# "blacklist" - hide only the blocks in "hidden" (storage, workstations, signs, beds, spawners...)
+# mode = "whitelist"
+# "underground" - only below the highest "cover" block (stone, dirt, sand...) of the column: surface builds are
+#                 sent as usual. Cheaper.
+# "everywhere"  - on the surface too. Builds farther than reveal-distance look empty from far away!
+# scope = "underground"
+# Ultra: a closed air pocket (room, stash, tunnel) around hidden blocks is filled with the surrounding stone too,
+# so freecam sees no cavity at all. Pockets bigger than fill-max-pocket blocks, open to the surface or reaching
+# farther than the neighbouring chunks are never filled (caves stay caves).
+# fill-pockets = false
+# With fill-pockets: also fill closed pockets that have nothing hidden inside (a room built only from blocks of the
+# "visible" list - stone, dirt...). Any closed underground space up to fill-max-pocket blocks disappears.
+# fill-empty-pockets = false
+# With fill-pockets: also fill the air inside buildings that are open to a cave (a castle, a mineshaft, a base with a
+# hole) - air from which 3 of 6 directions hit hidden blocks within 12 blocks; the cave itself stays.
+# fill-builds = false
+# fill-max-pocket = 2048
+# Never hidden this close to the player's eyes (blocks)
+# near-radius = 6
+# Hidden blocks farther than this are not revealed even when visible (blocks). More = more raycasts.
+# reveal-distance = 48
+# blacklist mode: what is hidden
+# hidden = [
+#     "chest", "trapped_chest", "#minecraft:copper_chests", "barrel", "ender_chest", "#minecraft:shulker_boxes",
+#     "hopper", "dispenser", "dropper", "crafter", "furnace", "blast_furnace", "smoker", "brewing_stand",
+#     "enchanting_table", "anvil", "chipped_anvil", "damaged_anvil", "beacon", "lectern", "jukebox", "decorated_pot",
+#     "chiseled_bookshelf", "#minecraft:wooden_shelves", "#minecraft:all_signs", "#minecraft:beds", "spawner",
+#     "crafting_table", "stonecutter", "grindstone", "loom", "cartography_table", "fletching_table", "smithing_table",
+#     "composter", "cauldron", "bell", "respawn_anchor", "lodestone", "conduit"
+# ]
+# whitelist mode: what is never hidden (ores are NOT here - they are hidden until seen)
+# visible = [
+#     "#minecraft:base_stone_overworld", "#minecraft:base_stone_nether", "#minecraft:dirt", "#minecraft:sand",
+#     "#minecraft:terracotta", "#minecraft:ice", "#minecraft:snow", "#minecraft:leaves", "#minecraft:logs",
+#     "#minecraft:flowers", "#minecraft:saplings", "#minecraft:replaceable", "#minecraft:corals",
+#     "#minecraft:coral_blocks", "#minecraft:wall_corals", "#minecraft:cave_vines", "#minecraft:nylium",
+#     "#minecraft:wart_blocks", "grass_block", "podzol", "mycelium", "mud", "muddy_mangrove_roots", "mangrove_roots",
+#     "moss_block", "pale_moss_block", "moss_carpet", "pale_moss_carpet", "clay", "gravel", "suspicious_gravel",
+#     "suspicious_sand", "sandstone", "red_sandstone", "bedrock", "water", "lava", "bubble_column", "obsidian",
+#     "magma_block", "calcite", "dripstone_block", "pointed_dripstone", "amethyst_block", "budding_amethyst",
+#     "small_amethyst_bud", "medium_amethyst_bud", "large_amethyst_bud", "amethyst_cluster", "smooth_basalt",
+#     "soul_sand", "soul_soil", "glowstone", "packed_ice", "blue_ice", "snow_block", "powder_snow", "sculk",
+#     "sculk_vein", "sculk_sensor", "sculk_shrieker", "sculk_catalyst", "brown_mushroom", "red_mushroom",
+#     "brown_mushroom_block", "red_mushroom_block", "mushroom_stem", "sugar_cane", "kelp", "kelp_plant", "seagrass",
+#     "tall_seagrass", "sea_pickle", "lily_pad", "cactus", "bamboo", "big_dripleaf", "big_dripleaf_stem",
+#     "small_dripleaf", "spore_blossom", "hanging_roots", "azalea", "flowering_azalea", "glow_lichen", "vine",
+#     "sweet_berry_bush", "pumpkin", "melon", "crimson_roots", "warped_roots", "nether_sprouts", "weeping_vines",
+#     "weeping_vines_plant", "twisting_vines", "twisting_vines_plant", "shroomlight", "crimson_fungus",
+#     "warped_fungus", "frogspawn", "pale_hanging_moss", "firefly_bush", "leaf_litter", "bush", "short_dry_grass",
+#     "tall_dry_grass", "cactus_flower", "resin_clump"
+# ]
+# underground scope: natural ground - a block is underground when one of these is above it
+# cover = [
+#     "#minecraft:base_stone_overworld", "#minecraft:base_stone_nether", "#minecraft:dirt", "#minecraft:sand",
+#     "#minecraft:terracotta", "#minecraft:nylium", "#c:ores", "grass_block", "podzol", "mycelium", "mud", "clay",
+#     "gravel", "sandstone", "red_sandstone", "calcite", "dripstone_block", "smooth_basalt", "soul_sand", "soul_soil",
+#     "snow_block", "packed_ice", "moss_block", "bedrock"
+# ]
+
+[ore-engine]
+# Optional: Paper's Anti-Xray engine on top (fills hidden stone with fake ores). Not needed with [blocks] whitelist.
+# enabled = false
+# 1 = hide ores as stone, 2 = obfuscate with random fake ores, 3 = obfuscate layer by layer
+# engine-mode = 1
+# Only below this height
+# max-block-height = 64
+# update-radius = 2
+# lava-obscures = false
+# hidden-blocks = ["#c:ores", "raw_copper_block", "raw_iron_block", "raw_gold_block", "!#antifreecam:hidden_only_ores"]
+# replacement-blocks = ["#antifreecam:hidden_only_ores", "stone", "deepslate", "andesite", "calcite", "diorite", "dirt",
+#     "granite", "gravel", "sand", "tuff", "mossy_cobblestone", "obsidian", "clay", "infested_stone", "amethyst_block",
+#     "budding_amethyst", "chest"]
+
+# Per-world overrides: any key of [blocks] and [ore-engine] for one world (full world id in quotes).
+# In the Nether everything is under the roof, so "whitelist" would hide fortresses and bastions until seen.
+[worlds."minecraft:the_nether".blocks]
+# mode = "blacklist"
+# scope = "everywhere"
+
+[worlds."minecraft:the_nether".ore-engine]
+# max-block-height = 128
+# lava-obscures = true
+# hidden-blocks = ["ancient_debris", "nether_quartz_ore", "nether_gold_ore", "gold_block", "gilded_blackstone"]
+
+[worlds."minecraft:the_end".blocks]
+# mode = "blacklist"
+# scope = "everywhere"
