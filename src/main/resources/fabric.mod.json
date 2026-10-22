@@ -12,6 +12,11 @@
     "DrexHD (AntiXray)",
     "LogisticsCraft (OcclusionCulling)"
   ],
+  "contact": {
+    "homepage": "https://modrinth.com/project/antifreecam-fabric",
+    "sources": "https://github.com/Vizer327/antifreecam-fabric",
+    "issues": "https://github.com/Vizer327/antifreecam-fabric/issues"
+  },
   "license": "AGPL-3.0-or-later",
   "environment": "server",
   "entrypoints": {

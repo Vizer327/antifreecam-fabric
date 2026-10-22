@@ -14,6 +14,8 @@ Cheats can only show what the server sends — so the server stops sending what 
 
 Only the server needs it. Clients don't install anything.
 
+Download: [Modrinth](https://modrinth.com/project/antifreecam-fabric) · Source: [GitHub](https://github.com/Vizer327/antifreecam-fabric) · Bugs: [Issues](https://github.com/Vizer327/antifreecam-fabric/issues)
+
 ## Install
 
 1. Fabric Loader, Fabric API, Java 25.
