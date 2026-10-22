@@ -51,6 +51,7 @@ public abstract class ChunkPacketBlockControllerAntiXray implements ChunkPacketB
     private final ThreadLocal<int[]> presetBlockStateBits = ThreadLocal.withInitial(() -> new int[getPresetBlockStatesLength()]);
 
     protected ChunkPacketBlockControllerAntiXray(Level level, Set<Block> toObfuscate, int maxBlockHeight, int updateRadius, boolean lavaObscures) {
+        this.rtLevel = level instanceof ServerLevel serverLevel ? serverLevel : null;
         this.maxBlockHeight = maxBlockHeight;
         this.updateRadius = updateRadius;
 
@@ -502,6 +503,47 @@ public abstract class ChunkPacketBlockControllerAntiXray implements ChunkPacketB
 
     // Underground scope: y of the highest natural cover block in this column; blocks below it are underground
     public int rtCoverTop(ChunkAccess chunk, int x, int z) {
+        // a column is underground only below the generated terrain too: a castle of diorite or stone (blocks that
+        // count as ground) standing on a hill must not turn everything under its roof into "underground"
+        return Math.min(rtScanCoverTop(chunk, x, z), rtTerrainTop(x, z));
+    }
+
+    // generated terrain height without anything built (sampled every 4 blocks, cached per chunk, a few blocks lower
+    // to be safe); MAX_VALUE when the generator can't tell (then only the ground blocks decide)
+    private static final int RT_TERRAIN_MARGIN = 3;
+    private final java.util.concurrent.ConcurrentHashMap<Long, int[]> rtTerrain = new java.util.concurrent.ConcurrentHashMap<>();
+    private ServerLevel rtLevel;
+
+    private int rtTerrainTop(int x, int z) {
+        ServerLevel level = this.rtLevel;
+        if (level == null) {
+            return Integer.MAX_VALUE;
+        }
+        long key = ChunkPos.pack(x >> 4, z >> 4);
+        int[] cells = rtTerrain.get(key);
+        if (cells == null) {
+            cells = new int[16];
+            int baseX = (x >> 4) << 4;
+            int baseZ = (z >> 4) << 4;
+            try {
+                net.minecraft.world.level.chunk.ChunkGenerator generator = level.getChunkSource().getGenerator();
+                net.minecraft.world.level.levelgen.RandomState random = level.getChunkSource().randomState();
+                for (int cell = 0; cell < 16; cell++) {
+                    cells[cell] = generator.getBaseHeight(baseX + (cell & 3) * 4 + 2, baseZ + (cell >> 2) * 4 + 2,
+                        net.minecraft.world.level.levelgen.Heightmap.Types.OCEAN_FLOOR_WG, level, random) - 1 - RT_TERRAIN_MARGIN;
+                }
+            } catch (RuntimeException e) {
+                java.util.Arrays.fill(cells, Integer.MAX_VALUE);
+            }
+            if (rtTerrain.size() > 65536) {
+                rtTerrain.clear();
+            }
+            rtTerrain.put(key, cells);
+        }
+        return cells[((z & 15) >> 2) * 4 + ((x & 15) >> 2)];
+    }
+
+    private int rtScanCoverTop(ChunkAccess chunk, int x, int z) {
         int top = chunk.getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.WORLD_SURFACE, x & 15, z & 15);
         BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
         for (int y = top; y >= chunk.getMinY(); y--) {
