@@ -43,7 +43,6 @@ public final class CullPlayer {
 
     private final FastStack<PlatformPlayer> tracked;
     private final Vec3d viewerPosition = new Vec3d(0, 0, 0);
-    private final Vec3d viewerDirection = new Vec3d(0, 0, 0);
     private final Vec3d viewerBack = new Vec3d(0, 0, 0);
     private final Vec3d viewerFront = new Vec3d(0, 0, 0);
 
@@ -239,10 +238,6 @@ public final class CullPlayer {
 
         // Refresh positions
         this.viewerPosition.set(eye.getX(), eye.getY(), eye.getZ()).mul(2);
-        this.viewerDirection.set(this.player.getDirection());
-        double inverseViewerDirX = -this.viewerDirection.x;
-        double inverseViewerDirY = -this.viewerDirection.y;
-        double inverseViewerDirZ = -this.viewerDirection.z;
 
         boolean backPos = false;
         boolean frontPos = false;
@@ -261,19 +256,12 @@ public final class CullPlayer {
             double aabbMaxX = trackedBox.maxX() * 2d;
             double aabbMaxY = trackedBox.maxY() * 2d;
             double aabbMaxZ = trackedBox.maxZ() * 2d;
-            double aabbCenterX = aabbMinX + (aabbMaxX - aabbMinX) / 2;
-            double aabbCenterY = aabbMinY + (aabbMaxY - aabbMinY) / 2;
-            double aabbCenterZ = aabbMinZ + (aabbMaxZ - aabbMinZ) / 2;
 
-            // Check if the player is in the view frustum, if, so we can cull it
-            boolean mainInner = isInnerAngle(
-                    aabbCenterX, aabbCenterY, aabbCenterZ,
-                    this.viewerPosition.x, this.viewerPosition.y, this.viewerPosition.z,
-                    this.viewerDirection.x, this.viewerDirection.y, this.viewerDirection.z
-            );
+            // Occlusion only, no view-angle check: a player behind the viewer is hidden only by blocks, otherwise
+            // turning around makes players pop in late (visibility passes lag behind fast head turns)
 
             // First person view
-            boolean canSee = mainInner && this.cullingInstance.isAABBVisible(
+            boolean canSee = this.cullingInstance.isAABBVisible(
                     aabbMinX, aabbMinY, aabbMinZ, aabbMaxX, aabbMaxY, aabbMaxZ, this.viewerPosition);
             if (!canSee) {
                 if (!backPos) {
@@ -282,14 +270,8 @@ public final class CullPlayer {
                     this.viewerBack.mul(2);
                     backPos = true;
                 }
-                boolean secondaryInner = isInnerAngle(
-                        aabbCenterX, aabbCenterY, aabbCenterZ,
-                        this.viewerBack.x, this.viewerBack.y, this.viewerBack.z,
-                        this.viewerDirection.x, this.viewerDirection.y, this.viewerDirection.z
-                );
-
                 // Third person view from back
-                canSee = secondaryInner && this.cullingInstance.isAABBVisible(
+                canSee = this.cullingInstance.isAABBVisible(
                         aabbMinX, aabbMinY, aabbMinZ,
                         aabbMaxX, aabbMaxY, aabbMaxZ,
                         this.viewerBack
@@ -301,13 +283,8 @@ public final class CullPlayer {
                         this.viewerFront.mul(2);
                         frontPos = true;
                     }
-                    boolean tertiaryInner = isInnerAngle(
-                            aabbCenterX, aabbCenterY, aabbCenterZ,
-                            this.viewerFront.x, this.viewerFront.y, this.viewerFront.z,
-                            inverseViewerDirX, inverseViewerDirY, inverseViewerDirZ);
-
                     // Third person view from front
-                    canSee = tertiaryInner && this.cullingInstance.isAABBVisible(
+                    canSee = this.cullingInstance.isAABBVisible(
                             aabbMinX, aabbMinY, aabbMinZ,
                             aabbMaxX, aabbMaxY, aabbMaxZ,
                             this.viewerFront

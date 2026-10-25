@@ -93,6 +93,7 @@ public final class BlockReveal {
     private static int packetBudgetTick = -1;
     // set while this class sends packets itself (reveal, split section updates) - they must not be filtered again
     private static boolean bypass = false;
+    private static volatile MinecraftServer server;
 
     private BlockReveal() {
     }
@@ -102,6 +103,13 @@ public final class BlockReveal {
     public static void setHidden(UUID viewer, ResourceKey<Level> dimension, long chunk, long[] positions, long[] filledPositions) {
         PlayerHidden state = HIDDEN.computeIfAbsent(viewer, k -> new PlayerHidden());
         if (!dimension.equals(state.dimension)) {
+            // a chunk of the old dimension finished after a teleport: dropping the new dimension's list for it would
+            // leave the player's fake blocks there unrevealed (stuck in stone only he sees)
+            MinecraftServer current = server;
+            ServerPlayer player = current == null ? null : current.getPlayerList().getPlayer(viewer);
+            if (player != null && !player.level().dimension().equals(dimension)) {
+                return;
+            }
             state.clear();
             state.dimension = dimension;
         }
@@ -232,6 +240,7 @@ public final class BlockReveal {
     }
 
     public static void tick(MinecraftServer server) {
+        BlockReveal.server = server;
         checkSpectators(server);
         if (HIDDEN.isEmpty()) {
             return;
