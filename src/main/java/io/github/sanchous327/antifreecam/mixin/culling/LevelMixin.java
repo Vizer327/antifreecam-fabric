@@ -30,7 +30,7 @@ public abstract class LevelMixin implements ILevel {
     )
     public void setBlock(BlockPos pos, BlockState state, int flags, int recursionLeft, CallbackInfoReturnable<Boolean> info) {
         if (info.getReturnValueZ()) {
-            this.changedBlocks.add(pos);
+            this.changedBlocks.add(pos.immutable()); // callers like /fill reuse one mutable pos for every block
         }
     }
 

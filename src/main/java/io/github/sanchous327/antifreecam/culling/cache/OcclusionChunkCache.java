@@ -25,6 +25,7 @@ public final class OcclusionChunkCache {
     private volatile int heightX2;
     private volatile boolean fullyComputed = false;
     private volatile boolean computing = false;
+    private boolean dirty = false; // blocks changed while the map was being built (guarded by this)
 
     private @Nullable WeakReference<PlatformChunkAccess> chunk;
 
@@ -139,7 +140,10 @@ public final class OcclusionChunkCache {
         if (depth > MAX_CHUNK_COMPUTE_DEPTH) {
             AntiFreecam.LOGGER.warn("Gave up building the wall map of chunk {}, {} after {} attempts",
                     this.x, this.z, MAX_CHUNK_COMPUTE_DEPTH);
-            this.computing = false;
+            synchronized (this) {
+                this.dirty = false;
+                this.computing = false;
+            }
             return;
         }
         try {
@@ -175,19 +179,26 @@ public final class OcclusionChunkCache {
             if (height != this.height) {
                 long[] minifiedData = new long[height * 4 * 8]; // resize data array to save memory
                 System.arraycopy(data, (bottomY - this.minY) * 4 * 8, minifiedData, 0, height * 4 * 8);
-                this.occlusionData = minifiedData;
-            } else {
-                this.occlusionData = data;
+                data = minifiedData;
             }
 
-            this.minY = bottomY;
-            this.minYX2 = bottomY * 2;
-            this.maxY = topY;
-            this.height = height;
-            this.heightX2 = height * 2;
+            synchronized (this) {
+                if (this.dirty) { // blocks changed during the scan, the map may miss them - scan again
+                    this.dirty = false;
+                } else {
+                    this.occlusionData = data;
+                    this.minY = bottomY;
+                    this.minYX2 = bottomY * 2;
+                    this.maxY = topY;
+                    this.height = height;
+                    this.heightX2 = height * 2;
 
-            this.fullyComputed = true;
-            this.computing = false;
+                    this.fullyComputed = true;
+                    this.computing = false;
+                    return;
+                }
+            }
+            this.computeFully0(access, depth + 1);
         } catch (Throwable throwable) {
             AntiFreecam.LOGGER.error("Wall map of chunk {}, {} could not be built", this.x, this.z, throwable);
             this.computeFully0(access, depth + 1); // retry
@@ -195,8 +206,13 @@ public final class OcclusionChunkCache {
     }
 
     public void recalculateBlock(int x, int y, int z) {
-        if (!this.fullyComputed) {
-            return;
+        synchronized (this) {
+            if (!this.fullyComputed) {
+                if (this.computing) {
+                    this.dirty = true; // the scan in progress may have read the old block
+                }
+                return;
+            }
         }
 
         x = x & 15;

@@ -2,6 +2,7 @@ package io.github.sanchous327.antifreecam.culling.fabric;
 
 import io.github.sanchous327.antifreecam.AntiFreecam;
 import io.github.sanchous327.antifreecam.culling.CullPlayer;
+import io.github.sanchous327.antifreecam.culling.CullShip;
 import io.github.sanchous327.antifreecam.culling.platform.entity.PlatformPlayer;
 import io.github.sanchous327.antifreecam.culling.platform.world.CulledEntity;
 import io.github.sanchous327.antifreecam.culling.fabric.common.IServerLevel;
@@ -65,6 +66,9 @@ public class CullingListener implements
         if (serverLevel.dimension() == ServerLevel.OVERWORLD) {
             // only tick platform once
             this.mod.getPlatform().tick();
+            if (serverLevel.getGameTime() % 100L == 0L) {
+                this.reviveStalledPlayers();
+            }
         }
         // tick wrapped world (if it exists)
         FabricWorld world = ((IServerLevel) serverLevel).getCullWorld();
@@ -78,6 +82,24 @@ public class CullingListener implements
         // players stay hidden and vanilla rules (distance, spectators) still apply.
         if (serverLevel.getGameTime() % 20L == 0L) {
             resyncTracking(serverLevel);
+        }
+    }
+
+    // A viewer whose visibility checks stopped (lost while moving between threads) would keep his last hidden set
+    // forever: show him everyone and hand him to a thread again
+    private void reviveStalledPlayers() {
+        CullShip ship = this.mod.getCullShip();
+        if (!ship.isCullingEnabled()) {
+            return;
+        }
+        long now = System.currentTimeMillis();
+        for (CullPlayer player : ship.getPlayers()) {
+            if (now - player.getLastCullMs() > 5000L && player.getPlatformPlayer().isOnline()) {
+                AntiFreecam.LOGGER.warn("Visibility checks for {} stalled - restarted", player.getPlatformPlayer().getUniqueId());
+                player.touchCull();
+                player.resetHidden();
+                ship.addPlayer(player);
+            }
         }
     }
 

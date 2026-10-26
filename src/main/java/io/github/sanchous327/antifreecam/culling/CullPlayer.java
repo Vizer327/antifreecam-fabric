@@ -57,6 +57,7 @@ public final class CullPlayer {
     private boolean spectating = false;
     private long lastDarkness = -1;
     private long lastRaySteps = 0L;
+    private volatile long lastCullMs = System.currentTimeMillis();
 
     public CullPlayer(CullShip ship, PlatformPlayer player) {
         this.ship = ship;
@@ -128,6 +129,7 @@ public final class CullPlayer {
         synchronized (this) {
             this.cull0();
             this.lastRaySteps = this.cullingInstance.getAndResetRaySteps();
+            this.lastCullMs = System.currentTimeMillis();
         }
         synchronized (this.toRemove) {
             this.hidden.removeAll(this.toRemove);
@@ -350,6 +352,14 @@ public final class CullPlayer {
 
     public long getLastRaySteps() {
         return this.lastRaySteps;
+    }
+
+    public long getLastCullMs() {
+        return this.lastCullMs;
+    }
+
+    public void touchCull() {
+        this.lastCullMs = System.currentTimeMillis();
     }
 
     public PlatformPlayer getPlatformPlayer() {

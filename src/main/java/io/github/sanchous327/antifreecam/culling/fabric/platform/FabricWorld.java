@@ -67,7 +67,7 @@ public class FabricWorld extends PlatformWorld {
     public @Nullable PlatformChunkAccess getChunkAccess(int x, int z) {
         long chunkKey = ChunkPos.pack(x, z);
         ChunkHolder chunkHolder = this.world.getChunkSource().chunkMap.getVisibleChunkIfPresent(chunkKey);
-        ChunkAccess chunk = chunkHolder != null ? chunkHolder.getChunkIfPresent(ChunkStatus.FEATURES) : null;
+        ChunkAccess chunk = chunkHolder != null ? chunkHolder.getChunkIfPresent(ChunkStatus.FULL) : null;
         return chunk != null ? new FabricChunkAccess(this.platform, chunk) : null;
     }
 
