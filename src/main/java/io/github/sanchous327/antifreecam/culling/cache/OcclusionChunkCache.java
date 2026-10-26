@@ -143,8 +143,8 @@ public final class OcclusionChunkCache {
             return;
         }
         try {
-            int bottomY = this.height;
-            int topY = 0;
+            int bottomY = Integer.MAX_VALUE;
+            int topY = Integer.MIN_VALUE;
             long[] data = new long[this.height * 4 * 8];
 
             for (int cy = 0; cy < this.height; cy++) {
@@ -167,6 +167,10 @@ public final class OcclusionChunkCache {
                 }
             }
 
+            if (topY < bottomY) { // nothing opaque in the chunk (void, sky islands): keep a one-row map
+                bottomY = this.minY;
+                topY = this.minY;
+            }
             int height = topY - bottomY + 1;
             if (height != this.height) {
                 long[] minifiedData = new long[height * 4 * 8]; // resize data array to save memory
@@ -198,19 +202,23 @@ public final class OcclusionChunkCache {
         x = x & 15;
         z = z & 15;
         y -= this.minY;
-        if (y < 0 || y >= this.height) { // out of range -> recalculate
+        if (y < 0 || y >= this.height) { // out of range -> grow the map to include this block
             int prevMin = this.minY;
-            int prevMax = this.maxY;
-            this.minY = Math.min(prevMin, y + prevMin);
-            this.maxY = Math.max(prevMax, y + prevMin);
+            int absY = y + prevMin;
+            long[] old = this.occlusionData;
+            this.minY = Math.min(prevMin, absY);
+            this.maxY = Math.max(this.maxY, absY);
             int height = this.maxY - this.minY + 1;
 
+            // The old rows keep their place: they start (prevMin - minY) rows into the grown map
             long[] data = new long[height * 4 * 8];
-            System.arraycopy(this.occlusionData, (prevMin - this.minY) * 4 * 8, data, (prevMin - this.minY) * 4 * 8, (prevMax - prevMin + 1) * 4 * 8);
+            int offset = (prevMin - this.minY) * 4 * 8;
+            System.arraycopy(old, 0, data, offset, Math.min(old.length, data.length - offset));
             this.occlusionData = data;
             this.height = height;
             this.heightX2 = height * 2;
             this.minYX2 = this.minY * 2;
+            y = absY - this.minY;
         }
         PlatformChunkAccess chunk = this.resolveChunkAccess();
         if (chunk == null) {
