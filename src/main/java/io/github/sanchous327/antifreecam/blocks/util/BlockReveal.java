@@ -209,6 +209,33 @@ public final class BlockReveal {
         return true;
     }
 
+    // /antifreecam block <pos>: what the mod knows about this position for this player (finding phantom blocks)
+    public static String describe(ServerPlayer player, BlockPos pos) {
+        ServerLevel level = player.level();
+        if (!(Util.getBlockController(level) instanceof ChunkPacketBlockControllerAntiXray controller) || !controller.rtEnabled()) {
+            return "block hiding is off in this world";
+        }
+        LevelChunk chunk = level.getChunkSource().getChunkNow(pos.getX() >> 4, pos.getZ() >> 4);
+        if (chunk == null) {
+            return "chunk not loaded";
+        }
+        long chunkKey = ChunkPos.pack(pos.getX() >> 4, pos.getZ() >> 4);
+        long packed = pos.asLong();
+        PlayerHidden state = HIDDEN.get(player.getUUID());
+        boolean hidden = state != null && isHiddenPos(state, chunkKey, packed);
+        boolean filled = state != null && contains(state.filled, chunkKey, packed);
+        long[] list = state == null ? null : state.chunks.get(chunkKey);
+        int[] used = new int[1];
+        boolean visible = isVisible(level, controller, player.getX(), player.getEyeY(), player.getZ(), pos.getX(), pos.getY(), pos.getZ(), used);
+        return "real: " + net.minecraft.core.registries.BuiltInRegistries.BLOCK.getKey(chunk.getBlockState(pos).getBlock())
+            + " | replaced for you: " + (hidden ? (filled ? "yes (filled)" : "yes") : "NO")
+            + " | a ray sees it now: " + (visible ? "yes" : "no")
+            + " | near: " + (isNear(player, controller, pos) ? "yes" : "no")
+            + " | chunk waiting to be sent: " + (player.connection.chunkSender.isPending(chunkKey) ? "yes" : "no")
+            + " | replaced in this chunk: " + (list == null ? 0 : list.length)
+            + " | world of the lists: " + (state == null || state.dimension == null ? "none" : state.dimension.toString());
+    }
+
     public static void dropChunk(UUID viewer, long chunk) {
         PlayerHidden state = HIDDEN.get(viewer);
         if (state != null) {

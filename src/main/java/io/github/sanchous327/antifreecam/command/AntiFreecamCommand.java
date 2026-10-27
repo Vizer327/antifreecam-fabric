@@ -50,6 +50,9 @@ public final class AntiFreecamCommand {
                         .executes(ctx -> pocket(ctx, ctx.getSource().getLevel(), ctx.getSource().getPlayerOrException().blockPosition()))
                         .then(Commands.argument("pos", BlockPosArgument.blockPos())
                                 .executes(ctx -> pocket(ctx, ctx.getSource().getLevel(), BlockPosArgument.getBlockPos(ctx, "pos")))))
+                .then(Commands.literal("block")
+                        .then(Commands.argument("pos", BlockPosArgument.blockPos())
+                                .executes(ctx -> block(ctx, ctx.getSource().getPlayerOrException(), BlockPosArgument.getBlockPos(ctx, "pos")))))
                 .then(Commands.literal("hidden")
                         .then(Commands.argument("player", EntityArgument.player())
                                 .executes(ctx -> hidden(ctx, mod, EntityArgument.getPlayer(ctx, "player"))))));
@@ -110,6 +113,13 @@ public final class AntiFreecamCommand {
                 ? probe + " - but fill-builds still fills the parts of it inside buildings" : probe;
         ctx.getSource().sendSuccess(() -> Component.literal("Pocket: " + result), false);
         return result.startsWith("CLOSED") ? 1 : 0;
+    }
+
+    // What the mod knows about one position for you - real block, replaced or not, seen by a ray (phantom blocks)
+    private static int block(CommandContext<CommandSourceStack> ctx, ServerPlayer player, BlockPos pos) {
+        String result = BlockReveal.describe(player, pos);
+        ctx.getSource().sendSuccess(() -> Component.literal(pos.toShortString() + ": " + result), false);
+        return 1;
     }
 
     private static int hidden(CommandContext<CommandSourceStack> ctx, AntiFreecam mod, ServerPlayer player) throws CommandSyntaxException {
