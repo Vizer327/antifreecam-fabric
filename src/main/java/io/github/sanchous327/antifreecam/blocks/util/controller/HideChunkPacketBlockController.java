@@ -51,7 +51,9 @@ public class HideChunkPacketBlockController extends ChunkPacketBlockControllerAn
     @Override
     public BlockState[] getPresetBlockStates(Level level, int bottomBlockY) {
         // Return the block states to be added to the paletted containers so that they can be used for obfuscation
-        if (bottomBlockY < maxBlockHeight) {
+        // also when the raytraced pass fills rooms/structures: the fill needs rock in the section's palette, a section of
+        // only air and hidden blocks had none and was sent empty - an empty cube among the filled ones
+        if (bottomBlockY < maxBlockHeight || rtFillsAnything()) {
             ResourceKey<Level> resourceKey = level.dimension();
             if (resourceKey.equals(Level.NETHER)) {
                 return presetBlockStatesNetherrack;

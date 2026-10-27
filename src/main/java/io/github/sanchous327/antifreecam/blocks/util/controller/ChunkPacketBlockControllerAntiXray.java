@@ -26,7 +26,6 @@ import net.minecraft.world.level.chunk.*;
 import net.minecraft.world.level.chunk.status.ChunkStatus;
 import net.minecraft.world.level.levelgen.structure.BoundingBox;
 import net.minecraft.world.level.levelgen.structure.Structure;
-import net.minecraft.world.level.levelgen.structure.StructurePiece;
 import net.minecraft.world.level.levelgen.structure.StructureStart;
 import net.minecraft.world.phys.shapes.CollisionContext;
 
@@ -141,9 +140,11 @@ public abstract class ChunkPacketBlockControllerAntiXray implements ChunkPacketB
         Util.backgroundExecutor().execute((Runnable) chunkPacketInfo);
     }
 
-    // fill-structures (server thread): boxes of the pieces of the listed structures that touch this chunk. The start of
-    // a structure lives in its start chunk - only an already loaded one is read (never loads or generates a chunk), a
-    // structure whose start chunk isn't loaded just isn't filled here this time
+    // fill-structures (server thread): the whole box of each listed structure that touches this chunk - not its rooms
+    // one by one: filled rooms alone stand in a cave as rock cubes that show the structure to a freecam, so all the
+    // air inside the structure's box (rooms, the cave and the pockets around them) is filled. The start of a structure
+    // lives in its start chunk - only an already loaded one is read (never loads or generates a chunk), a structure
+    // whose start chunk isn't loaded just isn't filled here this time
     private BoundingBox[] rtStructureBoxes(ServerLevel level, ServerChunkCache chunkCache, LevelChunk chunk) {
         java.util.Map<Structure, it.unimi.dsi.fastutil.longs.LongSet> references = chunk.getAllReferences();
         if (references.isEmpty()) {
@@ -169,12 +170,10 @@ public abstract class ChunkPacketBlockControllerAntiXray implements ChunkPacketB
                 if (start == null || !start.isValid()) {
                     continue;
                 }
-                for (StructurePiece piece : start.getPieces()) {
-                    BoundingBox box = piece.getBoundingBox();
-                    if (box.intersects(minX, minZ, maxX, maxZ)) {
-                        if (boxes == null) boxes = new java.util.ArrayList<>();
-                        boxes.add(box);
-                    }
+                BoundingBox box = start.getBoundingBox();
+                if (box.intersects(minX, minZ, maxX, maxZ)) {
+                    if (boxes == null) boxes = new java.util.ArrayList<>();
+                    boxes.add(box);
                 }
             }
         }
@@ -417,6 +416,11 @@ public abstract class ChunkPacketBlockControllerAntiXray implements ChunkPacketB
 
     public boolean rtFillBuildsOn() {
         return rtFillBuildsOn;
+    }
+
+    // the raytraced pass fills air (pockets, builds or structures) - sections need rock in their palette for it
+    public boolean rtFillsAnything() {
+        return rtOn && (rtFill || !rtStructures.isEmpty());
     }
 
     public boolean rtFillPockets() {
@@ -729,7 +733,7 @@ public abstract class ChunkPacketBlockControllerAntiXray implements ChunkPacketB
         if (fill != null && this.rtFillBuildsOn) {
             rtFillBuilds(info, chunk, hide, air, real, coverTop, fill);
         }
-        // 2b. fill-structures: all air inside the pieces of the listed structures becomes rock too
+        // 2b. fill-structures: all air inside the boxes of the listed structures becomes rock too
         if (structureBoxes != null) {
             if (fill == null) {
                 fill = new boolean[sections][];
@@ -817,9 +821,9 @@ public abstract class ChunkPacketBlockControllerAntiXray implements ChunkPacketB
     private static final int RT_BUILD_RAY = 12;
     private static final int RT_BUILD_HITS = 3;
 
-    // fill-structures: air inside the pieces of the listed structures (ancient city, trial chambers, stronghold...) is
-    // sent as the surrounding rock whatever the size of the room and even when it is open to a cave. Underground scope:
-    // only below the ground; never closer than near-radius
+    // fill-structures: all air inside the box of a listed structure (ancient city, trial chambers, stronghold,
+    // mineshaft...) - its rooms and the caves and pockets around them - is sent as the surrounding rock. Underground
+    // scope: only below the ground; never closer than near-radius
     private void rtFillStructures(ChunkPacketInfoAntiXray info, LevelChunk chunk, boolean[][] air, int[] coverTop,
                                   boolean[][] fill, BoundingBox[] boxes) {
         int minY = chunk.getMinY();
