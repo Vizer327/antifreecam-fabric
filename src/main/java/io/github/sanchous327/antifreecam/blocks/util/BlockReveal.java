@@ -68,7 +68,8 @@ public final class BlockReveal {
         // fill-structures: structures this player has seen (structureKey of their box) - their chunks come without the fill
         final java.util.Set<Long> unlocked = ConcurrentHashMap.newKeySet();
         // /antifreecam trace: what happened to each position of this player (position -> tick << 8 | event), null = off
-        volatile it.unimi.dsi.fastutil.longs.Long2LongMap trace;
+        volatile Map<Long, long[]> trace;
+        final Map<Long, long[]> traceChunks = new ConcurrentHashMap<>();
         final Map<Long, Integer> traceDrops = new ConcurrentHashMap<>();
         volatile int traceClear = -1;
         // revealed positions are sent once more RESEND_DELAY ticks later (server thread only): a reveal that reached the
@@ -140,12 +141,14 @@ public final class BlockReveal {
         }
         state.recheck(chunk);
         if (positions.length == 0) {
+            traceChunk(state, chunk, 30, 0);
             return;
         }
         long[] sorted = positions.clone();
         Arrays.sort(sorted);
         state.chunks.merge(chunk, sorted, BlockReveal::union);
         if (state.trace != null) {
+            traceChunk(state, chunk, 30, sorted.length);
             for (long pos : sorted) {
                 trace(state, pos, 1);
             }
@@ -186,7 +189,7 @@ public final class BlockReveal {
     }
 
     // ---- /antifreecam trace (finding phantom blocks) ----
-    private static final String[] TRACE_EVENTS = new String[32];
+    private static final String[] TRACE_EVENTS = new String[40];
     static {
         TRACE_EVENTS[1] = "replaced in a chunk packet";
         TRACE_EVENTS[2] = "replaced by a live block update";
@@ -198,6 +201,11 @@ public final class BlockReveal {
         TRACE_EVENTS[14] = "revealed: view ray";
         TRACE_EVENTS[15] = "unhidden: live update, near";
         TRACE_EVENTS[16] = "unhidden: live update, visible or not a hidden block";
+        TRACE_EVENTS[20] = "second send: sent";
+        TRACE_EVENTS[21] = "second send: skipped, hidden again";
+        TRACE_EVENTS[22] = "second send: skipped, chunk not the player's";
+        TRACE_EVENTS[30] = "chunk packet listed";
+        TRACE_EVENTS[31] = "chunk forgotten";
     }
 
     private static int tick() {
@@ -206,12 +214,26 @@ public final class BlockReveal {
     }
 
     private static void trace(PlayerHidden state, long pos, int event) {
-        it.unimi.dsi.fastutil.longs.Long2LongMap map = state.trace;
+        Map<Long, long[]> map = state.trace;
         if (map != null) {
-            synchronized (map) {
-                map.put(pos, ((long) tick() << 8) | event);
-            }
+            push(map, pos, ((long) tick() << 8) | event, 8);
         }
+    }
+
+    // chunk events: tick << 8 | event, the count of listed positions above bit 40
+    private static void traceChunk(PlayerHidden state, long chunk, int event, int count) {
+        if (state.trace != null) {
+            push(state.traceChunks, chunk, ((long) count << 40) | ((long) tick() << 8) | event, 12);
+        }
+    }
+
+    private static void push(Map<Long, long[]> map, long key, long value, int max) {
+        map.compute(key, (k, old) -> {
+            if (old == null) return new long[]{value};
+            long[] next = old.length < max ? Arrays.copyOf(old, old.length + 1) : Arrays.copyOfRange(old, 1, old.length + 1);
+            next[next.length - 1] = value;
+            return next;
+        });
     }
 
     public static boolean toggleTrace(ServerPlayer player) {
@@ -221,8 +243,9 @@ public final class BlockReveal {
             return false;
         }
         state.traceDrops.clear();
+        state.traceChunks.clear();
         state.traceClear = -1;
-        state.trace = new it.unimi.dsi.fastutil.longs.Long2LongOpenHashMap();
+        state.trace = new ConcurrentHashMap<>();
         return true;
     }
 
@@ -231,15 +254,29 @@ public final class BlockReveal {
             return " | history: trace is off (/antifreecam trace)";
         }
         int now = tick();
-        long value;
-        synchronized (state.trace) {
-            value = state.trace.getOrDefault(pos, -1L);
+        StringBuilder history = new StringBuilder();
+        long[] events = state.trace.get(pos);
+        if (events == null) {
+            history.append("nothing recorded");
+        } else {
+            for (long value : events) {
+                history.append("\n  ").append(now - (int) ((value >> 8) & 0xFFFFFFFFL)).append(" ago: ").append(TRACE_EVENTS[(int) (value & 0xFF)]);
+            }
         }
-        String history = value < 0 ? "nothing recorded" : TRACE_EVENTS[(int) (value & 0xFF)] + " " + (now - (int) (value >> 8)) + " ticks ago";
-        Integer drop = state.traceDrops.get(chunkKey);
-        return " | history: " + history
-            + " | chunk forgotten: " + (drop == null ? "no" : (now - drop) + " ticks ago")
-            + " | lists cleared: " + (state.traceClear < 0 ? "no" : (now - state.traceClear) + " ticks ago");
+        StringBuilder chunk = new StringBuilder();
+        long[] chunkEvents = state.traceChunks.get(chunkKey);
+        if (chunkEvents == null) {
+            chunk.append("nothing recorded");
+        } else {
+            for (long value : chunkEvents) {
+                int event = (int) (value & 0xFF);
+                chunk.append("\n  ").append(now - (int) ((value >> 8) & 0xFFFFFFFFL)).append(" ago: ").append(TRACE_EVENTS[event]);
+                if (event == 30) chunk.append(" (").append(value >>> 40).append(" positions)");
+            }
+        }
+        return "\n history of the block:" + history
+            + "\n history of its chunk:" + chunk
+            + "\n lists cleared: " + (state.traceClear < 0 ? "no" : (now - state.traceClear) + " ticks ago");
     }
 
     // fill-structures: id of a structure for "opened for this player" - the corner of its box
@@ -315,7 +352,10 @@ public final class BlockReveal {
     public static void dropChunk(UUID viewer, long chunk) {
         PlayerHidden state = HIDDEN.get(viewer);
         if (state != null) {
-            if (state.trace != null) state.traceDrops.put(chunk, tick());
+            if (state.trace != null) {
+                state.traceDrops.put(chunk, tick());
+                traceChunk(state, chunk, 31, 0);
+            }
             state.chunks.remove(chunk);
             state.filled.remove(chunk);
             for (int i = 0; i < PASSES; i++) {
@@ -843,10 +883,15 @@ public final class BlockReveal {
             state.resendTick.dequeueInt();
             int x = BlockPos.getX(packed);
             int z = BlockPos.getZ(packed);
-            if (!player.getChunkTrackingView().contains(x >> 4, z >> 4)
-                || isHiddenPos(state, ChunkPos.pack(x >> 4, z >> 4), packed)) {
+            if (!player.getChunkTrackingView().contains(x >> 4, z >> 4)) {
+                trace(state, packed, 22);
                 continue;
             }
+            if (isHiddenPos(state, ChunkPos.pack(x >> 4, z >> 4), packed)) {
+                trace(state, packed, 21);
+                continue;
+            }
+            trace(state, packed, 20);
             sendReal(player, level, x, BlockPos.getY(packed), z);
         }
     }
