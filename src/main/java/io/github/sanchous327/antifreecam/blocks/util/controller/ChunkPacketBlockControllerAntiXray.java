@@ -572,6 +572,9 @@ public abstract class ChunkPacketBlockControllerAntiXray implements ChunkPacketB
                 continue;
             }
             BlockState state = neighbourChunk.getBlockState(neighbour);
+            if (state.isAir()) {
+                return Blocks.AIR.defaultBlockState(); // open to air - vanishes, like in chunk packets
+            }
             if (!rtHides(state)) {
                 candidates[count++] = state;
             }
@@ -836,7 +839,10 @@ public abstract class ChunkPacketBlockControllerAntiXray implements ChunkPacketB
                         replacement = solidId;
                     }
                     if (replacement < 0) {
-                        replacement = rtReplacement(sIds, sHide, x, y, z, fallback);
+                        // a hidden block open to air on any side becomes air: taking its most common neighbour left a
+                        // building standing in a cave as a skeleton of rock (pillars next to the floor, stairs and slabs
+                        // turned into full cubes) - the building's shape. Air only if this section has it
+                        replacement = openSides > 0 && airId >= 0 ? airId : rtReplacement(sIds, sHide, x, y, z, fallback);
                     }
                     if (replacement >= 0) {
                         countDelta += rtNonAir(palette, replacement) - (hiddenState == null || hiddenState.isAir() ? 0 : 1);
