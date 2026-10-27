@@ -955,6 +955,12 @@ public abstract class ChunkPacketBlockControllerAntiXray implements ChunkPacketB
     }
 
     // First non-air block in this direction (within RT_BUILD_RAY) belongs to a building
+    // How thick a built wall may be before what is behind it is no longer looked at (counted as embedded)
+    private static final int RT_BUILD_WALL = 6;
+
+    // The ray hits a building wall - and the building is set in the rock: right behind the wall (up to RT_BUILD_WALL
+    // built blocks thick) is natural rock, not open cave. A building standing free in a cave is not filled: its walls
+    // vanish anyway, and its filled inside stood in the cave as a rock block in the building's shape
     private boolean rtBuildRay(LevelChunk chunk, ChunkAccess[] area, BlockState[][] real, int baseX, int baseZ, int minY,
                                int x, int y, int z, int dx, int dy, int dz) {
         for (int step = 1; step <= RT_BUILD_RAY; step++) {
@@ -963,7 +969,22 @@ public abstract class ChunkPacketBlockControllerAntiXray implements ChunkPacketB
                 return false;
             }
             if (!state.isAir()) {
-                return rtIsBuilt(state);
+                if (!rtIsBuilt(state)) {
+                    return false;
+                }
+                for (int behind = step + 1; behind <= step + RT_BUILD_WALL; behind++) {
+                    BlockState next = rtStateAt(chunk, area, real, baseX, baseZ, minY, x + dx * behind, y + dy * behind, z + dz * behind);
+                    if (next == null) {
+                        return true; // out of the known area - like before
+                    }
+                    if (next.isAir()) {
+                        return false; // open cave behind the wall - a free-standing building
+                    }
+                    if (!rtIsBuilt(next)) {
+                        return true; // natural rock behind the wall - the building is dug in
+                    }
+                }
+                return true; // a very thick wall
             }
         }
         return false;
