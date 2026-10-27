@@ -314,6 +314,17 @@ public final class BlockReveal {
         return v != null && tick() - v[1] < 600;
     }
 
+    // /antifreecam resend: forget the structures this player has opened - they come filled again (testing)
+    public static int forgetStructures(ServerPlayer player) {
+        PlayerHidden state = HIDDEN.get(player.getUUID());
+        if (state == null) {
+            return 0;
+        }
+        int count = state.unlocked.size();
+        state.unlocked.clear();
+        return count;
+    }
+
     // fill-structures: id of a structure for "opened for this player" - the corner of its box
     public static long structureKey(net.minecraft.world.level.levelgen.structure.BoundingBox box) {
         return BlockPos.asLong(box.minX(), box.minY(), box.minZ());

@@ -103,9 +103,10 @@ public final class AntiFreecamCommand {
 
     // Sends every chunk the player has loaded again - to see the effect of new block settings without relogging
     private static int resend(CommandContext<CommandSourceStack> ctx, ServerPlayer player) {
+        int structures = BlockReveal.forgetStructures(player);
         int count = BlockReveal.resendAll(player);
-        ctx.getSource().sendSuccess(() -> Component.literal(String.format("Sending %d chunks to %s again",
-                count, player.getScoreboardName())), false);
+        ctx.getSource().sendSuccess(() -> Component.literal(String.format("Sending %d chunks to %s again (structures he had opened, filled again: %d)",
+                count, player.getScoreboardName(), structures)), false);
         return count;
     }
 
