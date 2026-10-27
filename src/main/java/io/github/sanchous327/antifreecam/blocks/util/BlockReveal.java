@@ -74,12 +74,9 @@ public final class BlockReveal {
         final Map<Long, int[]> unsent = new ConcurrentHashMap<>();
         final Map<Long, Integer> traceDrops = new ConcurrentHashMap<>();
         volatile int traceClear = -1;
-        // revealed positions are sent once more RESEND_DELAY ticks later (server thread only): a reveal that reached the
-        // client before the chunk packet it belongs to (a chunk sent again - resend, spectator mode) was overwritten by
-        // that chunk's replacement and stayed a phantom block
-        final it.unimi.dsi.fastutil.longs.LongArrayFIFOQueue resendPos = new it.unimi.dsi.fastutil.longs.LongArrayFIFOQueue();
-        final it.unimi.dsi.fastutil.ints.IntArrayFIFOQueue resendTick = new it.unimi.dsi.fastutil.ints.IntArrayFIFOQueue();
-        // set by clear() (any thread): the queue belongs to the old world - emptied on the server thread
+        // blocks revealed this tick, sent together at the end of the player's scan (server thread only)
+        final it.unimi.dsi.fastutil.longs.LongOpenHashSet pendingReveal = new it.unimi.dsi.fastutil.longs.LongOpenHashSet();
+        // set by clear() (any thread): the pending reveals belong to the old world - emptied on the server thread
         volatile boolean resendReset;
 
         void clear() {
@@ -306,6 +303,14 @@ public final class BlockReveal {
         }
     }
 
+    // /antifreecam trace: a section update really left the server for this player
+    public static void sectionSent(UUID viewer, ClientboundSectionBlocksUpdatePacket packet) {
+        PlayerHidden state = HIDDEN.get(viewer);
+        if (state != null && state.trace != null) {
+            packet.runUpdates((pos, sent) -> trace(state, pos.asLong(), sent.isAir() ? 24 : 25));
+        }
+    }
+
     // The client doesn't have this chunk's last packet yet: a block sent now would reach him before the chunk and be
     // thrown away, the chunk would then bring the replacement back. A packet that never leaves (connection gone) stops
     // counting after 30 s
@@ -497,6 +502,7 @@ public final class BlockReveal {
             return;
         }
         int budget = RAY_BUDGET_PER_TICK;
+        viewRaysPerPlayer = Math.max(VIEW_RAYS_MIN, Math.min(VIEW_RAYS, VIEW_RAYS_TOTAL / players.size()));
         // start from a different player each tick, so one player with a huge storage room can't starve the others
         playerOffset = (playerOffset + 1) % players.size();
         for (int n = 0; n < players.size() && budget > 0; n++) {
@@ -504,9 +510,6 @@ public final class BlockReveal {
             PlayerHidden state = HIDDEN.get(player.getUUID());
             if (state == null) {
                 continue;
-            }
-            if (player.level().dimension().equals(state.dimension)) {
-                resendRevealed(player, player.level(), state);
             }
             if (state.chunks.isEmpty()) {
                 continue;
@@ -519,6 +522,7 @@ public final class BlockReveal {
                 continue;
             }
             budget = revealFor(player, level, controller, state, budget);
+            flushReveals(player, level, state);
         }
     }
 
@@ -696,6 +700,10 @@ public final class BlockReveal {
     // player really sees - it opens at once. In a huge build (an ancient city has a million hidden blocks) the per-block
     // scan reaches the block in front of the eyes only after seconds; with these the screen fills in a few ticks.
     private static final int VIEW_RAYS = 256;
+    // all players together: with many online each gets fewer view rays (never below VIEW_RAYS_MIN)
+    private static final int VIEW_RAYS_TOTAL = 2048;
+    private static final int VIEW_RAYS_MIN = 48;
+    private static int viewRaysPerPlayer = VIEW_RAYS;
     // half of the sampled field of view: ~51 degrees to the sides, ~39 degrees up and down (tangents)
     private static final double VIEW_TAN_H = 1.25;
     private static final double VIEW_TAN_V = 0.8;
@@ -718,7 +726,7 @@ public final class BlockReveal {
         double ux = -rz * ly, uy = rz * lx - rx * lz, uz = rx * ly;
         java.util.concurrent.ThreadLocalRandom random = java.util.concurrent.ThreadLocalRandom.current();
         BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
-        for (int n = 0; n < VIEW_RAYS; n++) {
+        for (int n = 0; n < viewRaysPerPlayer; n++) {
             double a = (random.nextDouble() * 2 - 1) * VIEW_TAN_H;
             double b = (random.nextDouble() * 2 - 1) * VIEW_TAN_V;
             double dx = lx + rx * a + ux * b;
@@ -899,46 +907,72 @@ public final class BlockReveal {
         return Math.max(Math.abs((int) chunkKey - pcx), Math.abs((int) (chunkKey >>> 32) - pcz));
     }
 
-    private static final int RESEND_DELAY = 40;
-    private static final int RESEND_MAX = 50000;
-
+    // A revealed block waits for the end of the player's scan this tick; then all of them go out together, one packet per
+    // chunk section (flushReveals) - a room flood opens thousands of blocks at once, a packet each was too much
     private static void reveal(ServerPlayer player, ServerLevel level, int x, int y, int z) {
         PlayerHidden state = HIDDEN.get(player.getUUID());
-        if (state != null) {
-            if (state.resendPos.size() >= RESEND_MAX) {
-                state.resendPos.dequeueLong();
-                state.resendTick.dequeueInt();
-            }
-            state.resendPos.enqueue(BlockPos.asLong(x, y, z));
-            state.resendTick.enqueue(tick());
+        if (state == null) {
+            sendReal(player, level, x, y, z);
+            return;
         }
-        sendReal(player, level, x, y, z);
+        state.pendingReveal.add(BlockPos.asLong(x, y, z));
     }
 
-    // The second send of revealed positions whose time has come - unless the position is hidden again meanwhile or its
-    // chunk is no longer the player's
-    private static void resendRevealed(ServerPlayer player, ServerLevel level, PlayerHidden state) {
+    // The blocks revealed to this player this tick: one section update per chunk section (a single block - a block
+    // update), then the data of the block entities among them
+    private static void flushReveals(ServerPlayer player, ServerLevel level, PlayerHidden state) {
         if (state.resendReset) {
             state.resendReset = false;
-            state.resendPos.clear();
-            state.resendTick.clear();
+            state.pendingReveal.clear();
         }
-        int due = tick() - RESEND_DELAY;
-        while (!state.resendTick.isEmpty() && state.resendTick.firstInt() <= due) {
-            long packed = state.resendPos.dequeueLong();
-            state.resendTick.dequeueInt();
-            int x = BlockPos.getX(packed);
-            int z = BlockPos.getZ(packed);
-            if (!player.getChunkTrackingView().contains(x >> 4, z >> 4)) {
-                trace(state, packed, 22);
-                continue;
+        if (state.pendingReveal.isEmpty()) {
+            return;
+        }
+        it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap<it.unimi.dsi.fastutil.shorts.ShortArraySet> sections = new it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap<>();
+        java.util.List<BlockPos> withEntity = new java.util.ArrayList<>();
+        it.unimi.dsi.fastutil.longs.LongIterator iterator = state.pendingReveal.iterator();
+        while (iterator.hasNext()) {
+            BlockPos pos = BlockPos.of(iterator.nextLong());
+            sections.computeIfAbsent(net.minecraft.core.SectionPos.asLong(pos.getX() >> 4, pos.getY() >> 4, pos.getZ() >> 4),
+                k -> new it.unimi.dsi.fastutil.shorts.ShortArraySet()).add(net.minecraft.core.SectionPos.sectionRelativePos(pos));
+        }
+        state.pendingReveal.clear();
+        bypass = true;
+        try {
+            for (it.unimi.dsi.fastutil.longs.Long2ObjectMap.Entry<it.unimi.dsi.fastutil.shorts.ShortArraySet> entry : sections.long2ObjectEntrySet()) {
+                net.minecraft.core.SectionPos sectionPos = net.minecraft.core.SectionPos.of(entry.getLongKey());
+                LevelChunk chunk = level.getChunkSource().getChunkNow(sectionPos.x(), sectionPos.z());
+                if (chunk == null) {
+                    continue;
+                }
+                int index = chunk.getSectionIndexFromSectionY(sectionPos.y());
+                if (index < 0 || index >= chunk.getSections().length) {
+                    continue;
+                }
+                it.unimi.dsi.fastutil.shorts.ShortArraySet cells = entry.getValue();
+                if (cells.size() == 1) {
+                    BlockPos pos = sectionPos.relativeToBlockPos(cells.iterator().nextShort());
+                    player.connection.send(new ClientboundBlockUpdatePacket(pos, chunk.getBlockState(pos)));
+                } else {
+                    player.connection.send(new ClientboundSectionBlocksUpdatePacket(sectionPos, cells, chunk.getSections()[index]));
+                }
+                it.unimi.dsi.fastutil.shorts.ShortIterator cellIterator = cells.iterator();
+                while (cellIterator.hasNext()) {
+                    BlockPos pos = sectionPos.relativeToBlockPos(cellIterator.nextShort());
+                    if (chunk.getBlockEntity(pos) != null) {
+                        withEntity.add(pos);
+                    }
+                }
             }
-            if (isHiddenPos(state, ChunkPos.pack(x >> 4, z >> 4), packed)) {
-                trace(state, packed, 21);
-                continue;
+            for (BlockPos pos : withEntity) {
+                BlockEntity blockEntity = level.getBlockEntity(pos);
+                Packet<?> update = blockEntity == null ? null : blockEntity.getUpdatePacket();
+                if (update != null) {
+                    player.connection.send(update);
+                }
             }
-            trace(state, packed, 20);
-            sendReal(player, level, x, BlockPos.getY(packed), z);
+        } finally {
+            bypass = false;
         }
     }
 
