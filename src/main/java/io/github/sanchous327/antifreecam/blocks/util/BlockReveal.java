@@ -416,8 +416,9 @@ public final class BlockReveal {
         }
     }
 
+    // revealed this tick (pendingReveal) counts as no longer hidden - it leaves the lists at the end of the tick
     private static boolean isHiddenPos(PlayerHidden state, long chunk, long pos) {
-        return contains(state.chunks, chunk, pos);
+        return contains(state.chunks, chunk, pos) && !state.pendingReveal.contains(pos);
     }
 
     private static boolean contains(Map<Long, long[]> map, long chunk, long pos) {
@@ -626,6 +627,9 @@ public final class BlockReveal {
                 continue; // already opened together with its room
             }
             long packed = positions[i];
+            if (state.pendingReveal.contains(packed)) {
+                continue; // revealed this tick already
+            }
             int x = BlockPos.getX(packed);
             int y = BlockPos.getY(packed);
             int z = BlockPos.getZ(packed);
@@ -766,7 +770,6 @@ public final class BlockReveal {
                 long packed = BlockPos.asLong(x, y, z);
                 if (isHiddenPos(state, chunkKey, packed) && !unsent(state, chunkKey)) {
                     boolean filled = contains(state.filled, chunkKey, packed);
-                    removeHiddenPos(state, chunkKey, packed);
                     trace(state, packed, 14);
                     reveal(player, level, x, y, z);
                     if (filled && !(controller.rtFillsStructures() && unlockStructure(player, level, controller, state, x, y, z))) {
@@ -831,11 +834,7 @@ public final class BlockReveal {
                     int index = Arrays.binarySearch(positions, next);
                     if (index >= 0) {
                         revealed[index] = true;
-                    } else {
-                        removeHiddenPos(state, nextChunk, next);
                     }
-                } else {
-                    removeHiddenPos(state, nextChunk, next);
                 }
                 queue.add(next);
             }
@@ -880,11 +879,7 @@ public final class BlockReveal {
                             continue;
                         }
                         revealed[index] = true;
-                    } else {
-                        removeHiddenPos(state, nextChunk, packed);
                     }
-                } else {
-                    removeHiddenPos(state, nextChunk, packed);
                 }
                 trace(state, packed, 13);
                 reveal(player, level, next.getX(), next.getY(), next.getZ());
@@ -918,6 +913,15 @@ public final class BlockReveal {
         state.pendingReveal.add(BlockPos.asLong(x, y, z));
     }
 
+    private static long[] without(long[] positions, it.unimi.dsi.fastutil.longs.LongOpenHashSet gone) {
+        int kept = 0;
+        long[] result = new long[positions.length];
+        for (long pos : positions) {
+            if (!gone.contains(pos)) result[kept++] = pos;
+        }
+        return kept == 0 ? null : kept == positions.length ? positions : Arrays.copyOf(result, kept);
+    }
+
     // The blocks revealed to this player this tick: one section update per chunk section (a single block - a block
     // update), then the data of the block entities among them
     private static void flushReveals(ServerPlayer player, ServerLevel level, PlayerHidden state) {
@@ -930,13 +934,22 @@ public final class BlockReveal {
         }
         it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap<it.unimi.dsi.fastutil.shorts.ShortArraySet> sections = new it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap<>();
         java.util.List<BlockPos> withEntity = new java.util.ArrayList<>();
+        it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap<it.unimi.dsi.fastutil.longs.LongOpenHashSet> byChunk = new it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap<>();
         it.unimi.dsi.fastutil.longs.LongIterator iterator = state.pendingReveal.iterator();
         while (iterator.hasNext()) {
-            BlockPos pos = BlockPos.of(iterator.nextLong());
+            long packed = iterator.nextLong();
+            BlockPos pos = BlockPos.of(packed);
             sections.computeIfAbsent(net.minecraft.core.SectionPos.asLong(pos.getX() >> 4, pos.getY() >> 4, pos.getZ() >> 4),
                 k -> new it.unimi.dsi.fastutil.shorts.ShortArraySet()).add(net.minecraft.core.SectionPos.sectionRelativePos(pos));
+            byChunk.computeIfAbsent(ChunkPos.pack(pos.getX() >> 4, pos.getZ() >> 4), k -> new it.unimi.dsi.fastutil.longs.LongOpenHashSet()).add(packed);
         }
         state.pendingReveal.clear();
+        // the revealed blocks leave the lists: one pass per chunk, not an array copy per block
+        for (it.unimi.dsi.fastutil.longs.Long2ObjectMap.Entry<it.unimi.dsi.fastutil.longs.LongOpenHashSet> entry : byChunk.long2ObjectEntrySet()) {
+            it.unimi.dsi.fastutil.longs.LongOpenHashSet gone = entry.getValue();
+            state.chunks.computeIfPresent(entry.getLongKey(), (k, positions) -> without(positions, gone));
+            state.filled.computeIfPresent(entry.getLongKey(), (k, positions) -> without(positions, gone));
+        }
         bypass = true;
         try {
             for (it.unimi.dsi.fastutil.longs.Long2ObjectMap.Entry<it.unimi.dsi.fastutil.shorts.ShortArraySet> entry : sections.long2ObjectEntrySet()) {
