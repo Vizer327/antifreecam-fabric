@@ -74,6 +74,8 @@ public final class BlockReveal {
         final Map<Long, int[]> unsent = new ConcurrentHashMap<>();
         final Map<Long, Integer> traceDrops = new ConcurrentHashMap<>();
         volatile int traceClear = -1;
+        // next cell of the view-ray grid (server thread only)
+        int viewCursor;
         // blocks revealed this tick, sent together at the end of the player's scan (server thread only)
         final it.unimi.dsi.fastutil.longs.LongOpenHashSet pendingReveal = new it.unimi.dsi.fastutil.longs.LongOpenHashSet();
         // set by clear() (any thread): the pending reveals belong to the old world - emptied on the server thread
@@ -711,6 +713,10 @@ public final class BlockReveal {
     // half of the sampled field of view: ~51 degrees to the sides, ~39 degrees up and down (tangents)
     private static final double VIEW_TAN_H = 1.25;
     private static final double VIEW_TAN_V = 0.8;
+    // the grid of view-ray cells (a power of two in all) and an odd stride - every cell once per round, scattered
+    private static final int VIEW_GRID_W = 64;
+    private static final int VIEW_GRID_H = 32;
+    private static final int VIEW_GRID_STRIDE = 1031;
 
     private static void viewRays(ServerPlayer player, ServerLevel level, ChunkPacketBlockControllerAntiXray controller,
                                  PlayerHidden state, double ex, double ey, double ez, net.minecraft.world.phys.Vec3 look,
@@ -730,9 +736,13 @@ public final class BlockReveal {
         double ux = -rz * ly, uy = rz * lx - rx * lz, uz = rx * ly;
         java.util.concurrent.ThreadLocalRandom random = java.util.concurrent.ThreadLocalRandom.current();
         BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
+        // the field of view is a grid of VIEW_GRID_W x VIEW_GRID_H cells walked in a fixed scattered order: each tick the
+        // next cells get a ray (a random point inside the cell), so the whole view is covered in a few ticks instead of
+        // waiting for random rays to hit the last uncovered spots
         for (int n = 0; n < viewRaysPerPlayer; n++) {
-            double a = (random.nextDouble() * 2 - 1) * VIEW_TAN_H;
-            double b = (random.nextDouble() * 2 - 1) * VIEW_TAN_V;
+            int cell = (int) (((long) state.viewCursor++ * VIEW_GRID_STRIDE) & (VIEW_GRID_W * VIEW_GRID_H - 1));
+            double a = (((cell % VIEW_GRID_W) + random.nextDouble()) / VIEW_GRID_W * 2 - 1) * VIEW_TAN_H;
+            double b = (((cell / VIEW_GRID_W) + random.nextDouble()) / VIEW_GRID_H * 2 - 1) * VIEW_TAN_V;
             double dx = lx + rx * a + ux * b;
             double dy = ly + uy * b;
             double dz = lz + rz * a + uz * b;
@@ -772,8 +782,13 @@ public final class BlockReveal {
                     boolean filled = contains(state.filled, chunkKey, packed);
                     trace(state, packed, 14);
                     reveal(player, level, x, y, z);
-                    if (filled && !(controller.rtFillsStructures() && unlockStructure(player, level, controller, state, x, y, z))) {
-                        floodReveal(player, level, controller, state, chunkKey, null, null, packed);
+                    if (filled) {
+                        if (!(controller.rtFillsStructures() && unlockStructure(player, level, controller, state, x, y, z))) {
+                            floodReveal(player, level, controller, state, chunkKey, null, null, packed);
+                        }
+                    } else {
+                        // the hidden blocks lining the same visible air next to it open too - a wall opens in pieces
+                        spreadReveal(player, level, controller, state, chunkKey, null, null, x, y, z, sx, sy, sz);
                     }
                 }
                 if (controller.rtOccludes(chunk.getBlockState(pos.set(x, y, z)))) {
@@ -872,7 +887,7 @@ public final class BlockReveal {
                 if (!isHiddenPos(state, nextChunk, packed) || contains(state.filled, nextChunk, packed) || unsent(state, nextChunk)) {
                     continue;
                 }
-                if (nextChunk == chunkKey) {
+                if (positions != null && nextChunk == chunkKey) {
                     int index = Arrays.binarySearch(positions, packed);
                     if (index >= 0) {
                         if (revealed[index]) {
