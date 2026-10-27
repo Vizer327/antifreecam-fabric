@@ -340,8 +340,14 @@ public final class BlockReveal {
         for (int pass = 0; pass < PASSES; pass++) {
             int passBudget = pass == PASSES - 1 ? budget : Math.min(budget, (int) (total * PASS_SHARE[pass]) + carry);
             int before = passBudget;
+            // a chunk wholly farther than this pass's ring isn't walked through at all (filled structures make the lists
+            // of a chunk long)
+            double ringMax = pass == 1 || pass == 4 ? RING_1 : pass == 2 || pass == 5 ? RING_2 : maxDistance;
             for (int k = 0; k < keys.size() && passBudget > 0; k++) {
                 long chunkKey = keys.getLong(k);
+                if (horizontalMinDistance(chunkKey, ex, ez) > ringMax) {
+                    continue;
+                }
                 Integer checkedAt = state.checked[pass].get(chunkKey);
                 if (checkedAt != null && tick - checkedAt < RECHECK_TICKS) {
                     continue;
@@ -407,7 +413,7 @@ public final class BlockReveal {
                 revealed[i] = true;
                 reveal(player, level, x, y, z);
                 if (contains(state.filled, chunkKey, packed)) {
-                    budget -= floodReveal(player, level, state, chunkKey, positions, revealed, packed);
+                    budget -= floodReveal(player, level, controller, state, chunkKey, positions, revealed, packed);
                 } else if (!near) {
                     budget -= spreadReveal(player, level, controller, state, chunkKey, positions, revealed, x, y, z, ex, ey, ez) / 4;
                 }
@@ -444,9 +450,10 @@ public final class BlockReveal {
     private static final int FLOOD_RADIUS = 16;
 
     // One filled air cell of a room is visible - the player is looking into that room: reveal all its filled air at
-    // once instead of cell by cell. Only real air spreads it; hidden blocks inside (furniture, redstone) still wait
+    // once instead of cell by cell. Only filled cells that aren't full blocks spread it; hidden blocks inside (furniture, redstone) still wait
     // until they are seen themselves. Returns the ray budget to charge.
-    private static int floodReveal(ServerPlayer player, ServerLevel level, PlayerHidden state, long chunkKey,
+    private static int floodReveal(ServerPlayer player, ServerLevel level, ChunkPacketBlockControllerAntiXray controller,
+                                   PlayerHidden state, long chunkKey,
                                    long[] positions, boolean[] revealed, long start) {
         it.unimi.dsi.fastutil.longs.LongOpenHashSet visited = new it.unimi.dsi.fastutil.longs.LongOpenHashSet();
         LongArrayList queue = new LongArrayList();
@@ -465,7 +472,8 @@ public final class BlockReveal {
                 if (Math.abs(pos.getX() - BlockPos.getX(start)) > FLOOD_RADIUS || Math.abs(pos.getY() - BlockPos.getY(start)) > FLOOD_RADIUS
                     || Math.abs(pos.getZ() - BlockPos.getZ(start)) > FLOOD_RADIUS) continue;
                 LevelChunk chunk = level.getChunkSource().getChunkNow(pos.getX() >> 4, pos.getZ() >> 4);
-                if (chunk == null || !chunk.getBlockState(pos).isAir()) continue;
+                // through every filled cell that isn't a full block (air, and in filled structures also water, sculk veins...)
+                if (chunk == null || controller.rtOccludes(chunk.getBlockState(pos))) continue;
                 reveal(player, level, pos.getX(), pos.getY(), pos.getZ());
                 count++;
                 if (nextChunk == chunkKey) {
@@ -532,6 +540,15 @@ public final class BlockReveal {
             }
         }
         return count;
+    }
+
+    // horizontal distance from the eyes to the nearest column of the chunk
+    private static double horizontalMinDistance(long chunkKey, double ex, double ez) {
+        int minX = ((int) chunkKey) << 4;
+        int minZ = ((int) (chunkKey >>> 32)) << 4;
+        double dx = ex < minX ? minX - ex : ex > minX + 16 ? ex - (minX + 16) : 0;
+        double dz = ez < minZ ? minZ - ez : ez > minZ + 16 ? ez - (minZ + 16) : 0;
+        return Math.sqrt(dx * dx + dz * dz);
     }
 
     private static int chunkDistance(long chunkKey, int pcx, int pcz) {
@@ -687,8 +704,9 @@ public final class BlockReveal {
             removeHiddenPos(state, chunkKey, packed);
             return null;
         }
-        // ultra: a cell of a filled pocket stays solid on the client, whatever happens there (block broken -> air)
-        boolean filledCell = controller.rtFillPockets() && isHiddenPos(state, chunkKey, packed) && contains(state.filled, chunkKey, packed);
+        // a filled cell (pocket, building or structure) stays solid on the client, whatever happens there (block broken ->
+        // air, a right click answered with the real block) - until a ray really sees it
+        boolean filledCell = controller.rtFillsAnything() && isHiddenPos(state, chunkKey, packed) && contains(state.filled, chunkKey, packed);
         if (!filledCell && !controller.rtShouldHideAt(chunk, blockState, pos.getX(), pos.getY(), pos.getZ())
             || isVisibleNow(player, level, controller, pos)) {
             removeHiddenPos(state, chunkKey, packed);

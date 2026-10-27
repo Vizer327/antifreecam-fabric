@@ -738,7 +738,7 @@ public abstract class ChunkPacketBlockControllerAntiXray implements ChunkPacketB
             if (fill == null) {
                 fill = new boolean[sections][];
             }
-            rtFillStructures(info, chunk, air, coverTop, fill, structureBoxes);
+            rtFillStructures(info, chunk, air, real, coverTop, fill, structureBoxes);
         }
 
         // 3. write
@@ -821,11 +821,13 @@ public abstract class ChunkPacketBlockControllerAntiXray implements ChunkPacketB
     private static final int RT_BUILD_RAY = 12;
     private static final int RT_BUILD_HITS = 3;
 
-    // fill-structures: all air inside the box of a listed structure (ancient city, trial chambers, stronghold,
-    // mineshaft...) - its rooms and the caves and pockets around them - is sent as the surrounding rock. Underground
+    // fill-structures: everything that isn't a full opaque block inside the box of a listed structure (ancient city,
+    // trial chambers, stronghold, mineshaft...) - air of its rooms, caves and pockets around them, but also sculk veins,
+    // glow lichen, dripstone tips, candles, cobwebs, rails, water - is sent as the surrounding rock. A thin block left
+    // in the rock made the client draw the faces around it: single cubes scattered over the filled area. Underground
     // scope: only below the ground; never closer than near-radius
-    private void rtFillStructures(ChunkPacketInfoAntiXray info, LevelChunk chunk, boolean[][] air, int[] coverTop,
-                                  boolean[][] fill, BoundingBox[] boxes) {
+    private void rtFillStructures(ChunkPacketInfoAntiXray info, LevelChunk chunk, boolean[][] air, BlockState[][] real,
+                                  int[] coverTop, boolean[][] fill, BoundingBox[] boxes) {
         int minY = chunk.getMinY();
         int maxY = minY + air.length * 16 - 1;
         int baseX = chunk.getPos().x() << 4;
@@ -839,11 +841,11 @@ public abstract class ChunkPacketBlockControllerAntiXray implements ChunkPacketB
             int y1 = Math.min(box.maxY(), maxY);
             for (int y = y0; y <= y1; y++) {
                 int s = (y - minY) >> 4;
-                if (air[s] == null) continue;
+                if (air[s] == null || real[s] == null) continue;
                 for (int z = z0; z <= z1; z++) {
                     for (int x = x0; x <= x1; x++) {
                         int i = (x - baseX) | ((z - baseZ) << 4) | (((y - minY) & 15) << 8);
-                        if (!air[s][i]) continue;
+                        if (!air[s][i] && (real[s][i] == null || rtOccludes(real[s][i]))) continue;
                         if (coverTop != null && y >= coverTop[i & 255]) continue;
                         if (!rtIsFar(info, x, y, z)) continue;
                         if (fill[s] == null) fill[s] = new boolean[4096];
