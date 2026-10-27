@@ -47,6 +47,16 @@ public abstract class ConnectionMixin {
         }
     }
 
+    // a chunk packet really leaves the server now: its blocks may be revealed from here on (BlockReveal.chunkSent)
+    @Unique
+    private void antiFreecam$sending(Packet<?> packet) {
+        if (packet instanceof net.minecraft.network.protocol.game.ClientboundLevelChunkWithLightPacket chunkPacket
+            && ((Connection) (Object) this).getPacketListener() instanceof net.minecraft.server.network.ServerGamePacketListenerImpl listener) {
+            io.github.sanchous327.antifreecam.blocks.util.BlockReveal.chunkSent(listener.player.getUUID(),
+                net.minecraft.world.level.ChunkPos.pack(chunkPacket.x(), chunkPacket.z()));
+        }
+    }
+
     @Redirect(
         method = "send(Lnet/minecraft/network/protocol/Packet;Lio/netty/channel/ChannelFutureListener;Z)V",
         at = @At(
@@ -56,10 +66,14 @@ public abstract class ConnectionMixin {
     )
     public void redirectSendPacket(Connection instance, Packet<?> packet, ChannelFutureListener listener, boolean flush) {
         if (this.antiFreecam$isActionReady.isEmpty() && Util.isReady(packet)) {
+            this.antiFreecam$sending(packet);
             this.sendPacket(packet, listener, flush);
         } else {
             synchronized (this.pendingActions) {
-                pendingActions.add(connection -> this.sendPacket(packet, listener, flush));
+                pendingActions.add(connection -> {
+                    this.antiFreecam$sending(packet);
+                    this.sendPacket(packet, listener, flush);
+                });
                 antiFreecam$isActionReady.add(() -> Util.isReady(packet));
             }
         }

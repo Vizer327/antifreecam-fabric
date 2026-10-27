@@ -70,6 +70,8 @@ public final class BlockReveal {
         // /antifreecam trace: what happened to each position of this player (position -> tick << 8 | event), null = off
         volatile Map<Long, long[]> trace;
         final Map<Long, long[]> traceChunks = new ConcurrentHashMap<>();
+        // chunk -> {chunk packets listed but not yet sent to the client, tick of the last one}: their blocks wait
+        final Map<Long, int[]> unsent = new ConcurrentHashMap<>();
         final Map<Long, Integer> traceDrops = new ConcurrentHashMap<>();
         volatile int traceClear = -1;
         // revealed positions are sent once more RESEND_DELAY ticks later (server thread only): a reveal that reached the
@@ -83,6 +85,7 @@ public final class BlockReveal {
         void clear() {
             if (trace != null) traceClear = tick();
             resendReset = true;
+            unsent.clear();
             chunks.clear();
             filled.clear();
             unlocked.clear();
@@ -140,6 +143,8 @@ public final class BlockReveal {
             state.dimension = dimension;
         }
         state.recheck(chunk);
+        int now = tick();
+        state.unsent.compute(chunk, (k, v) -> v == null ? new int[]{1, now} : new int[]{v[0] + 1, now});
         if (positions.length == 0) {
             traceChunk(state, chunk, 30, 0);
             return;
@@ -206,6 +211,7 @@ public final class BlockReveal {
         TRACE_EVENTS[22] = "second send: skipped, chunk not the player's";
         TRACE_EVENTS[30] = "chunk packet listed";
         TRACE_EVENTS[31] = "chunk forgotten";
+        TRACE_EVENTS[32] = "chunk packet sent to the client";
     }
 
     private static int tick() {
@@ -277,6 +283,25 @@ public final class BlockReveal {
         return "\n history of the block:" + history
             + "\n history of its chunk:" + chunk
             + "\n lists cleared: " + (state.traceClear < 0 ? "no" : (now - state.traceClear) + " ticks ago");
+    }
+
+    // A chunk packet left the server for this player (ConnectionMixin): the client has the chunk from now on
+    public static void chunkSent(UUID viewer, long chunk) {
+        PlayerHidden state = HIDDEN.get(viewer);
+        if (state == null) {
+            return;
+        }
+        state.unsent.computeIfPresent(chunk, (k, v) -> v[0] <= 1 ? null : new int[]{v[0] - 1, v[1]});
+        state.recheck(chunk);
+        traceChunk(state, chunk, 32, 0);
+    }
+
+    // The client doesn't have this chunk's last packet yet: a block sent now would reach him before the chunk and be
+    // thrown away, the chunk would then bring the replacement back. A packet that never leaves (connection gone) stops
+    // counting after 30 s
+    private static boolean unsent(PlayerHidden state, long chunk) {
+        int[] v = state.unsent.get(chunk);
+        return v != null && tick() - v[1] < 600;
     }
 
     // fill-structures: id of a structure for "opened for this player" - the corner of its box
@@ -561,7 +586,7 @@ public final class BlockReveal {
                                  long chunkKey, int pass, net.minecraft.world.phys.Vec3 look, double ex, double ey, double ez,
                                  int tick, int budget) {
         long[] positions = state.chunks.get(chunkKey);
-        if (positions == null || positions.length == 0) {
+        if (positions == null || positions.length == 0 || unsent(state, chunkKey)) {
             return budget;
         }
         int maxDistance = controller.rtRevealDistance();
@@ -710,7 +735,7 @@ public final class BlockReveal {
                 }
                 long chunkKey = ChunkPos.pack(x >> 4, z >> 4);
                 long packed = BlockPos.asLong(x, y, z);
-                if (isHiddenPos(state, chunkKey, packed)) {
+                if (isHiddenPos(state, chunkKey, packed) && !unsent(state, chunkKey)) {
                     boolean filled = contains(state.filled, chunkKey, packed);
                     removeHiddenPos(state, chunkKey, packed);
                     trace(state, packed, 14);
@@ -764,7 +789,7 @@ public final class BlockReveal {
                 long next = pos.asLong();
                 if (!visited.add(next)) continue;
                 long nextChunk = ChunkPos.pack(pos.getX() >> 4, pos.getZ() >> 4);
-                if (!contains(state.filled, nextChunk, next) || !isHiddenPos(state, nextChunk, next)) continue;
+                if (!contains(state.filled, nextChunk, next) || !isHiddenPos(state, nextChunk, next) || unsent(state, nextChunk)) continue;
                 if (Math.abs(pos.getX() - BlockPos.getX(start)) > FLOOD_RADIUS || Math.abs(pos.getY() - BlockPos.getY(start)) > FLOOD_RADIUS
                     || Math.abs(pos.getZ() - BlockPos.getZ(start)) > FLOOD_RADIUS) continue;
                 LevelChunk chunk = level.getChunkSource().getChunkNow(pos.getX() >> 4, pos.getZ() >> 4);
@@ -816,7 +841,7 @@ public final class BlockReveal {
                 }
                 long nextChunk = ChunkPos.pack(next.getX() >> 4, next.getZ() >> 4);
                 long packed = next.asLong();
-                if (!isHiddenPos(state, nextChunk, packed) || contains(state.filled, nextChunk, packed)) {
+                if (!isHiddenPos(state, nextChunk, packed) || contains(state.filled, nextChunk, packed) || unsent(state, nextChunk)) {
                     continue;
                 }
                 if (nextChunk == chunkKey) {
