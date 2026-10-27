@@ -71,9 +71,17 @@ public final class BlockReveal {
         volatile it.unimi.dsi.fastutil.longs.Long2LongMap trace;
         final Map<Long, Integer> traceDrops = new ConcurrentHashMap<>();
         volatile int traceClear = -1;
+        // revealed positions are sent once more RESEND_DELAY ticks later (server thread only): a reveal that reached the
+        // client before the chunk packet it belongs to (a chunk sent again - resend, spectator mode) was overwritten by
+        // that chunk's replacement and stayed a phantom block
+        final it.unimi.dsi.fastutil.longs.LongArrayFIFOQueue resendPos = new it.unimi.dsi.fastutil.longs.LongArrayFIFOQueue();
+        final it.unimi.dsi.fastutil.ints.IntArrayFIFOQueue resendTick = new it.unimi.dsi.fastutil.ints.IntArrayFIFOQueue();
+        // set by clear() (any thread): the queue belongs to the old world - emptied on the server thread
+        volatile boolean resendReset;
 
         void clear() {
             if (trace != null) traceClear = tick();
+            resendReset = true;
             chunks.clear();
             filled.clear();
             unlocked.clear();
@@ -408,7 +416,13 @@ public final class BlockReveal {
         for (int n = 0; n < players.size() && budget > 0; n++) {
             ServerPlayer player = players.get((playerOffset + n) % players.size());
             PlayerHidden state = HIDDEN.get(player.getUUID());
-            if (state == null || state.chunks.isEmpty()) {
+            if (state == null) {
+                continue;
+            }
+            if (player.level().dimension().equals(state.dimension)) {
+                resendRevealed(player, player.level(), state);
+            }
+            if (state.chunks.isEmpty()) {
                 continue;
             }
             ServerLevel level = player.level();
@@ -799,7 +813,45 @@ public final class BlockReveal {
         return Math.max(Math.abs((int) chunkKey - pcx), Math.abs((int) (chunkKey >>> 32) - pcz));
     }
 
+    private static final int RESEND_DELAY = 40;
+    private static final int RESEND_MAX = 50000;
+
     private static void reveal(ServerPlayer player, ServerLevel level, int x, int y, int z) {
+        PlayerHidden state = HIDDEN.get(player.getUUID());
+        if (state != null) {
+            if (state.resendPos.size() >= RESEND_MAX) {
+                state.resendPos.dequeueLong();
+                state.resendTick.dequeueInt();
+            }
+            state.resendPos.enqueue(BlockPos.asLong(x, y, z));
+            state.resendTick.enqueue(tick());
+        }
+        sendReal(player, level, x, y, z);
+    }
+
+    // The second send of revealed positions whose time has come - unless the position is hidden again meanwhile or its
+    // chunk is no longer the player's
+    private static void resendRevealed(ServerPlayer player, ServerLevel level, PlayerHidden state) {
+        if (state.resendReset) {
+            state.resendReset = false;
+            state.resendPos.clear();
+            state.resendTick.clear();
+        }
+        int due = tick() - RESEND_DELAY;
+        while (!state.resendTick.isEmpty() && state.resendTick.firstInt() <= due) {
+            long packed = state.resendPos.dequeueLong();
+            state.resendTick.dequeueInt();
+            int x = BlockPos.getX(packed);
+            int z = BlockPos.getZ(packed);
+            if (!player.getChunkTrackingView().contains(x >> 4, z >> 4)
+                || isHiddenPos(state, ChunkPos.pack(x >> 4, z >> 4), packed)) {
+                continue;
+            }
+            sendReal(player, level, x, BlockPos.getY(packed), z);
+        }
+    }
+
+    private static void sendReal(ServerPlayer player, ServerLevel level, int x, int y, int z) {
         LevelChunk chunk = level.getChunkSource().getChunkNow(x >> 4, z >> 4);
         if (chunk == null) {
             return;
