@@ -24,6 +24,10 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.*;
 import net.minecraft.world.level.chunk.status.ChunkStatus;
+import net.minecraft.world.level.levelgen.structure.BoundingBox;
+import net.minecraft.world.level.levelgen.structure.Structure;
+import net.minecraft.world.level.levelgen.structure.StructurePiece;
+import net.minecraft.world.level.levelgen.structure.StructureStart;
 import net.minecraft.world.phys.shapes.CollisionContext;
 
 import java.util.Set;
@@ -131,7 +135,50 @@ public abstract class ChunkPacketBlockControllerAntiXray implements ChunkPacketB
             }
             antiXrayInfo.setAreaChunks(area);
         }
+        if (this.rtOn && !this.rtStructures.isEmpty()) {
+            antiXrayInfo.setStructureBoxes(rtStructureBoxes((ServerLevel) chunk.getLevel(), chunkCache, chunk));
+        }
         Util.backgroundExecutor().execute((Runnable) chunkPacketInfo);
+    }
+
+    // fill-structures (server thread): boxes of the pieces of the listed structures that touch this chunk. The start of
+    // a structure lives in its start chunk - only an already loaded one is read (never loads or generates a chunk), a
+    // structure whose start chunk isn't loaded just isn't filled here this time
+    private BoundingBox[] rtStructureBoxes(ServerLevel level, ServerChunkCache chunkCache, LevelChunk chunk) {
+        java.util.Map<Structure, it.unimi.dsi.fastutil.longs.LongSet> references = chunk.getAllReferences();
+        if (references.isEmpty()) {
+            return null;
+        }
+        net.minecraft.core.Registry<Structure> registry = level.registryAccess().lookupOrThrow(Registries.STRUCTURE);
+        int minX = chunk.getPos().getMinBlockX();
+        int minZ = chunk.getPos().getMinBlockZ();
+        int maxX = chunk.getPos().getMaxBlockX();
+        int maxZ = chunk.getPos().getMaxBlockZ();
+        java.util.List<BoundingBox> boxes = null;
+        for (java.util.Map.Entry<Structure, it.unimi.dsi.fastutil.longs.LongSet> entry : references.entrySet()) {
+            net.minecraft.resources.Identifier id = registry.getKey(entry.getKey());
+            if (id == null || !this.rtStructures.contains(id.toString())) {
+                continue;
+            }
+            for (long startChunk : entry.getValue()) {
+                ChunkAccess startAccess = rtLoadedChunk(chunkCache, ChunkPos.getX(startChunk), ChunkPos.getZ(startChunk));
+                if (startAccess == null) {
+                    continue;
+                }
+                StructureStart start = startAccess.getStartForStructure(entry.getKey());
+                if (start == null || !start.isValid()) {
+                    continue;
+                }
+                for (StructurePiece piece : start.getPieces()) {
+                    BoundingBox box = piece.getBoundingBox();
+                    if (box.intersects(minX, minZ, maxX, maxZ)) {
+                        if (boxes == null) boxes = new java.util.ArrayList<>();
+                        boxes.add(box);
+                    }
+                }
+            }
+        }
+        return boxes == null ? null : boxes.toArray(new BoundingBox[0]);
     }
 
     private static ChunkAccess rtLoadedChunk(ServerChunkCache chunkCache, int chunkX, int chunkZ) {
@@ -345,6 +392,13 @@ public abstract class ChunkPacketBlockControllerAntiXray implements ChunkPacketB
     private boolean rtFillEmpty = false;
     // also air inside buildings that are open to a cave (see rtFillBuilds)
     private boolean rtFillBuildsOn = false;
+
+    // fill-structures: ids of structures whose pieces are filled whole (empty = off)
+    private Set<String> rtStructures = Set.of();
+
+    public void rtConfigureStructures(Set<String> structures) {
+        this.rtStructures = structures;
+    }
 
     public void rtConfigureFill(boolean fill, boolean fillEmpty, boolean fillBuilds, int maxPocket) {
         this.rtFillBuildsOn = fill && fillBuilds;
@@ -591,7 +645,8 @@ public abstract class ChunkPacketBlockControllerAntiXray implements ChunkPacketB
         // per section, null = section not in the packet buffer
         int[][] ids = new int[sections][];
         boolean[][] hide = new boolean[sections][];
-        boolean[][] air = rtFill ? new boolean[sections][] : null;
+        BoundingBox[] structureBoxes = info.getStructureBoxes();
+        boolean[][] air = rtFill || structureBoxes != null ? new boolean[sections][] : null;
         BlockState[][] real = new BlockState[sections][];
         LevelChunkSection[] chunkSections = chunk.getSections();
         boolean[] sectionAny = new boolean[sections];
@@ -664,15 +719,22 @@ public abstract class ChunkPacketBlockControllerAntiXray implements ChunkPacketB
             anyAtAll |= any;
         }
         long chunkKey = ChunkPos.pack(chunk.getPos().x(), chunk.getPos().z());
-        if (!anyAtAll && !this.rtFillEmpty) {
+        if (!anyAtAll && !this.rtFillEmpty && structureBoxes == null) {
             io.github.sanchous327.antifreecam.blocks.util.BlockReveal.setHidden(info.rtViewer(), chunk.getLevel().dimension(), chunkKey, new long[0], new long[0]);
             return;
         }
 
         // 2. ultra: closed air pockets around hidden blocks become solid
-        boolean[][] fill = air != null ? rtFindPockets(info, chunk, hide, air, real, coverTop) : null;
+        boolean[][] fill = air != null && rtFill ? rtFindPockets(info, chunk, hide, air, real, coverTop) : null;
         if (fill != null && this.rtFillBuildsOn) {
             rtFillBuilds(info, chunk, hide, air, real, coverTop, fill);
+        }
+        // 2b. fill-structures: all air inside the pieces of the listed structures becomes rock too
+        if (structureBoxes != null) {
+            if (fill == null) {
+                fill = new boolean[sections][];
+            }
+            rtFillStructures(info, chunk, air, coverTop, fill, structureBoxes);
         }
 
         // 3. write
@@ -754,6 +816,39 @@ public abstract class ChunkPacketBlockControllerAntiXray implements ChunkPacketB
     // they hit natural rock.
     private static final int RT_BUILD_RAY = 12;
     private static final int RT_BUILD_HITS = 3;
+
+    // fill-structures: air inside the pieces of the listed structures (ancient city, trial chambers, stronghold...) is
+    // sent as the surrounding rock whatever the size of the room and even when it is open to a cave. Underground scope:
+    // only below the ground; never closer than near-radius
+    private void rtFillStructures(ChunkPacketInfoAntiXray info, LevelChunk chunk, boolean[][] air, int[] coverTop,
+                                  boolean[][] fill, BoundingBox[] boxes) {
+        int minY = chunk.getMinY();
+        int maxY = minY + air.length * 16 - 1;
+        int baseX = chunk.getPos().x() << 4;
+        int baseZ = chunk.getPos().z() << 4;
+        for (BoundingBox box : boxes) {
+            int x0 = Math.max(box.minX(), baseX);
+            int x1 = Math.min(box.maxX(), baseX + 15);
+            int z0 = Math.max(box.minZ(), baseZ);
+            int z1 = Math.min(box.maxZ(), baseZ + 15);
+            int y0 = Math.max(box.minY(), minY);
+            int y1 = Math.min(box.maxY(), maxY);
+            for (int y = y0; y <= y1; y++) {
+                int s = (y - minY) >> 4;
+                if (air[s] == null) continue;
+                for (int z = z0; z <= z1; z++) {
+                    for (int x = x0; x <= x1; x++) {
+                        int i = (x - baseX) | ((z - baseZ) << 4) | (((y - minY) & 15) << 8);
+                        if (!air[s][i]) continue;
+                        if (coverTop != null && y >= coverTop[i & 255]) continue;
+                        if (!rtIsFar(info, x, y, z)) continue;
+                        if (fill[s] == null) fill[s] = new boolean[4096];
+                        fill[s][i] = true;
+                    }
+                }
+            }
+        }
+    }
 
     private boolean rtIsBuilt(BlockState state) {
         return state != null && rtHides(state) && !rtCoverGlobal.getOrDefault(state, false);

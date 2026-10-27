@@ -439,6 +439,9 @@ public final class BlockReveal {
     }
 
     private static final int FLOOD_MAX = 8192;
+    // a filled room opens within this many blocks of the seen cell: a huge filled structure (fill-structures) must
+    // not open whole - with all its corridors - from one look through a doorway
+    private static final int FLOOD_RADIUS = 16;
 
     // One filled air cell of a room is visible - the player is looking into that room: reveal all its filled air at
     // once instead of cell by cell. Only real air spreads it; hidden blocks inside (furniture, redstone) still wait
@@ -459,6 +462,8 @@ public final class BlockReveal {
                 if (!visited.add(next)) continue;
                 long nextChunk = ChunkPos.pack(pos.getX() >> 4, pos.getZ() >> 4);
                 if (!contains(state.filled, nextChunk, next) || !isHiddenPos(state, nextChunk, next)) continue;
+                if (Math.abs(pos.getX() - BlockPos.getX(start)) > FLOOD_RADIUS || Math.abs(pos.getY() - BlockPos.getY(start)) > FLOOD_RADIUS
+                    || Math.abs(pos.getZ() - BlockPos.getZ(start)) > FLOOD_RADIUS) continue;
                 LevelChunk chunk = level.getChunkSource().getChunkNow(pos.getX() >> 4, pos.getZ() >> 4);
                 if (chunk == null || !chunk.getBlockState(pos).isAir()) continue;
                 reveal(player, level, pos.getX(), pos.getY(), pos.getZ());

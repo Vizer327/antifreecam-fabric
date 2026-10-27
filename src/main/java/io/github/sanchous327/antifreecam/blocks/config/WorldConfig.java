@@ -39,6 +39,8 @@ public class WorldConfig {
     public boolean fillEmptyPockets = false;
     public boolean fillBuilds = false;
     public int fillMaxPocket = 2048;
+    // structures whose pieces are filled whole until seen (ids like "minecraft:ancient_city"); empty = off
+    public List<String> fillStructures = List.of();
     public int nearRadius = 16;
     public int revealDistance = 48;
     public Set<Block> hiddenBlocks = new HashSet<>();
@@ -68,6 +70,7 @@ public class WorldConfig {
         this.fillEmptyPockets = blocks.getBoolean("fill-empty-pockets", this.fillEmptyPockets);
         this.fillBuilds = blocks.getBoolean("fill-builds", this.fillBuilds);
         this.fillMaxPocket = blocks.getInt("fill-max-pocket", this.fillMaxPocket);
+        this.fillStructures = blocks.getStringList("fill-structures", this.fillStructures);
         this.nearRadius = blocks.getInt("near-radius", this.nearRadius);
         this.revealDistance = blocks.getInt("reveal-distance", this.revealDistance);
         this.hiddenBlocks = parseBlocks(blocks.getStringList("hidden", List.of()));
@@ -148,6 +151,7 @@ public class WorldConfig {
             controller.rtConfigure(this.mode, this.scope, this.hiddenBlocks, this.visibleBlocks, this.coverBlocks,
                 this.nearRadius, this.revealDistance);
             controller.rtConfigureFill(this.fillPockets, this.fillEmptyPockets, this.fillBuilds, this.fillMaxPocket);
+            controller.rtConfigureStructures(new HashSet<>(this.fillStructures));
         }
         return controller;
     }

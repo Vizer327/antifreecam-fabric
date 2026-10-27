@@ -4,6 +4,7 @@ import io.github.sanchous327.antifreecam.blocks.util.controller.ChunkPacketBlock
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.ChunkAccess;
 import net.minecraft.world.level.chunk.LevelChunk;
+import net.minecraft.world.level.levelgen.structure.BoundingBox;
 
 public final class ChunkPacketInfoAntiXray extends ChunkPacketInfo<BlockState> implements Runnable {
 
@@ -11,6 +12,8 @@ public final class ChunkPacketInfoAntiXray extends ChunkPacketInfo<BlockState> i
     private ChunkAccess[] nearbyChunks;
     // pocket search: the 5x5 chunks around this one, index (dz + 2) * 5 + (dx + 2); null = this chunk / not loaded
     private ChunkAccess[] areaChunks;
+    // fill-structures: boxes of the listed structures' pieces that touch this chunk; null = none
+    private BoundingBox[] structureBoxes;
 
     public ChunkPacketInfoAntiXray(LevelChunk chunk, ChunkPacketBlockControllerAntiXray chunkPacketBlockControllerAntiXray) {
         super(chunk);
@@ -35,6 +38,14 @@ public final class ChunkPacketInfoAntiXray extends ChunkPacketInfo<BlockState> i
 
     public void setAreaChunks(ChunkAccess[] areaChunks) {
         this.areaChunks = areaChunks;
+    }
+
+    public BoundingBox[] getStructureBoxes() {
+        return structureBoxes;
+    }
+
+    public void setStructureBoxes(BoundingBox[] structureBoxes) {
+        this.structureBoxes = structureBoxes;
     }
 
     @Override
