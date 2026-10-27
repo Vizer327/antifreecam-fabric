@@ -400,6 +400,8 @@ public final class BlockReveal {
                 reveal(player, level, x, y, z);
                 if (contains(state.filled, chunkKey, packed)) {
                     budget -= floodReveal(player, level, state, chunkKey, positions, revealed, packed);
+                } else if (!near) {
+                    budget -= spreadReveal(player, level, controller, state, chunkKey, positions, revealed, x, y, z, ex, ey, ez) / 4;
                 }
             }
         }
@@ -467,6 +469,56 @@ public final class BlockReveal {
             }
         }
         return count / 4;
+    }
+
+    // A block was seen by a ray: the hidden blocks lining the same open cells next to it (on its sides turned to the
+    // eyes) open too - they face the same visible air, so a cave wall opens whole instead of in spots (a block seen
+    // only at a grazing angle misses its rays). Only through real open cells the client also sees as open: a block
+    // behind a wall touches no such cell. Filled air (fake rock of a room) is left to floodReveal. Returns the count.
+    private static int spreadReveal(ServerPlayer player, ServerLevel level, ChunkPacketBlockControllerAntiXray controller,
+                                    PlayerHidden state, long chunkKey, long[] positions, boolean[] revealed,
+                                    int bx, int by, int bz, double ex, double ey, double ez) {
+        int count = 0;
+        BlockPos.MutableBlockPos air = new BlockPos.MutableBlockPos();
+        BlockPos.MutableBlockPos next = new BlockPos.MutableBlockPos();
+        for (net.minecraft.core.Direction side : net.minecraft.core.Direction.values()) {
+            double toEye = (ex - (bx + 0.5)) * side.getStepX() + (ey - (by + 0.5)) * side.getStepY() + (ez - (bz + 0.5)) * side.getStepZ();
+            if (toEye <= 0) {
+                continue; // a side turned away from the eyes
+            }
+            air.set(bx + side.getStepX(), by + side.getStepY(), bz + side.getStepZ());
+            long airChunk = ChunkPos.pack(air.getX() >> 4, air.getZ() >> 4);
+            if (!isOpen(level, controller, air.getX(), air.getY(), air.getZ()) || isHiddenPos(state, airChunk, air.asLong())) {
+                continue;
+            }
+            for (net.minecraft.core.Direction direction : net.minecraft.core.Direction.values()) {
+                next.setWithOffset(air, direction);
+                if (next.getX() == bx && next.getY() == by && next.getZ() == bz) {
+                    continue;
+                }
+                long nextChunk = ChunkPos.pack(next.getX() >> 4, next.getZ() >> 4);
+                long packed = next.asLong();
+                if (!isHiddenPos(state, nextChunk, packed) || contains(state.filled, nextChunk, packed)) {
+                    continue;
+                }
+                if (nextChunk == chunkKey) {
+                    int index = Arrays.binarySearch(positions, packed);
+                    if (index >= 0) {
+                        if (revealed[index]) {
+                            continue;
+                        }
+                        revealed[index] = true;
+                    } else {
+                        removeHiddenPos(state, nextChunk, packed);
+                    }
+                } else {
+                    removeHiddenPos(state, nextChunk, packed);
+                }
+                reveal(player, level, next.getX(), next.getY(), next.getZ());
+                count++;
+            }
+        }
+        return count;
     }
 
     private static int chunkDistance(long chunkKey, int pcx, int pcz) {
