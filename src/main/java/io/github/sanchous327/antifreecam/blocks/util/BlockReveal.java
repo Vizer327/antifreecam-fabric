@@ -180,7 +180,8 @@ public final class BlockReveal {
 
     // A filled cell of a listed structure was really seen: the whole structure opens for this player at once - the fill in
     // reverse. Its chunks the player has are sent again without its fill (a chunk packet each, not a block update per
-    // cell - a structure has hundreds of thousands of them). Returns false if the cell isn't in a filled structure.
+    // cell - a structure has hundreds of thousands of them). Only a cell in one of its pieces (rooms, corridors) opens
+    // it; the cave around them opens around the seen cell. Returns false if the cell isn't in a filled structure piece.
     private static boolean unlockStructure(ServerPlayer player, ServerLevel level, ChunkPacketBlockControllerAntiXray controller,
                                            PlayerHidden state, int x, int y, int z) {
         net.minecraft.world.level.levelgen.structure.BoundingBox box = controller.rtStructureBoxAt(level, new BlockPos(x, y, z), player.getUUID());
@@ -199,9 +200,9 @@ public final class BlockReveal {
                 if (chunk == null) {
                     continue;
                 }
-                // the new packet brings its own lists - the old ones (the fill) would only cost rays
-                dropChunk(player.getUUID(), ChunkPos.pack(cx, cz));
-                // the client keeps the chunk until the new one replaces it - no hole in the world meanwhile
+                // like resendAll: forget the chunk and send it again (only marking it pending didn't always resend an
+                // already sent chunk - the client kept the fill while our lists for it were gone: phantom blocks)
+                player.connection.chunkSender.dropChunk(player, new ChunkPos(cx, cz));
                 player.connection.chunkSender.markChunkPendingToSend(chunk);
             }
         }

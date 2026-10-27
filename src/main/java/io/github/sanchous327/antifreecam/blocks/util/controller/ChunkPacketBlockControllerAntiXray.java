@@ -182,8 +182,10 @@ public abstract class ChunkPacketBlockControllerAntiXray implements ChunkPacketB
         return boxes == null ? null : boxes.toArray(new BoundingBox[0]);
     }
 
-    // fill-structures (server thread): the box of a listed structure this position is in that the viewer hasn't opened yet
-    // (structures can overlap), or null. Only already loaded chunks are read, like when filling
+    // fill-structures (server thread): the box of a listed structure one of whose pieces (rooms, corridors) this position
+    // is in and that the viewer hasn't opened yet (structures can overlap), or null. The cave around the pieces doesn't
+    // count - a mineshaft's box is huge, walking past its edge must not open the whole mineshaft. Only already loaded
+    // chunks are read, like when filling
     public BoundingBox rtStructureBoxAt(ServerLevel level, BlockPos pos, java.util.UUID viewer) {
         if (this.rtStructures.isEmpty()) {
             return null;
@@ -204,7 +206,11 @@ public abstract class ChunkPacketBlockControllerAntiXray implements ChunkPacketB
                 StructureStart start = startAccess == null ? null : startAccess.getStartForStructure(entry.getKey());
                 if (start != null && start.isValid() && start.getBoundingBox().isInside(pos)
                     && !io.github.sanchous327.antifreecam.blocks.util.BlockReveal.isUnlocked(viewer, io.github.sanchous327.antifreecam.blocks.util.BlockReveal.structureKey(start.getBoundingBox()))) {
-                    return start.getBoundingBox();
+                    for (net.minecraft.world.level.levelgen.structure.StructurePiece piece : start.getPieces()) {
+                        if (piece.getBoundingBox().isInside(pos)) {
+                            return start.getBoundingBox();
+                        }
+                    }
                 }
             }
         }
@@ -474,7 +480,7 @@ public abstract class ChunkPacketBlockControllerAntiXray implements ChunkPacketB
                 continue;
             }
             BlockState state = neighbourChunk.getBlockState(neighbour);
-            if (rtOccludes(state) && !rtHides(state)) {
+            if (rtOccludes(state) && !rtHides(state) && rtCoverGlobal.getOrDefault(state, false)) {
                 candidates[count++] = state;
             }
         }
@@ -1389,7 +1395,10 @@ public abstract class ChunkPacketBlockControllerAntiXray implements ChunkPacketB
         int bestCount = 0;
         for (int i = 0; i < 4096; i++) {
             BlockState state = real[i];
-            if (hide[i] || fill[i] || state == null || !rtOccludes(state) || rtHides(state)) continue;
+            // only ground (cover) blocks: a mineshaft's dark oak logs are "natural" too, but a fill made of them is
+            // squares of logs in the rock
+            if (hide[i] || fill[i] || state == null || !rtOccludes(state) || rtHides(state)
+                || !rtCoverGlobal.getOrDefault(state, false)) continue;
             int c = counts.addTo(state, 1) + 1;
             if (c > bestCount) {
                 bestCount = c;
