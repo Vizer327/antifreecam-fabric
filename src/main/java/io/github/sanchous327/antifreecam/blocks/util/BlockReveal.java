@@ -67,8 +67,13 @@ public final class BlockReveal {
         float lastYaw, lastPitch;
         // fill-structures: structures this player has seen (structureKey of their box) - their chunks come without the fill
         final java.util.Set<Long> unlocked = ConcurrentHashMap.newKeySet();
+        // /antifreecam trace: what happened to each position of this player (position -> tick << 8 | event), null = off
+        volatile it.unimi.dsi.fastutil.longs.Long2LongMap trace;
+        final Map<Long, Integer> traceDrops = new ConcurrentHashMap<>();
+        volatile int traceClear = -1;
 
         void clear() {
+            if (trace != null) traceClear = tick();
             chunks.clear();
             filled.clear();
             unlocked.clear();
@@ -132,6 +137,11 @@ public final class BlockReveal {
         long[] sorted = positions.clone();
         Arrays.sort(sorted);
         state.chunks.merge(chunk, sorted, BlockReveal::union);
+        if (state.trace != null) {
+            for (long pos : sorted) {
+                trace(state, pos, 1);
+            }
+        }
         if (filledPositions.length > 0) {
             long[] sortedFilled = filledPositions.clone();
             Arrays.sort(sortedFilled);
@@ -165,6 +175,63 @@ public final class BlockReveal {
             count += positions.length;
         }
         return count;
+    }
+
+    // ---- /antifreecam trace (finding phantom blocks) ----
+    private static final String[] TRACE_EVENTS = new String[32];
+    static {
+        TRACE_EVENTS[1] = "replaced in a chunk packet";
+        TRACE_EVENTS[2] = "replaced by a live block update";
+        TRACE_EVENTS[3] = "marked hidden by block entity data";
+        TRACE_EVENTS[10] = "revealed: scan, near";
+        TRACE_EVENTS[11] = "revealed: scan, ray";
+        TRACE_EVENTS[12] = "revealed: room flood";
+        TRACE_EVENTS[13] = "revealed: spread through air";
+        TRACE_EVENTS[14] = "revealed: view ray";
+        TRACE_EVENTS[15] = "unhidden: live update, near";
+        TRACE_EVENTS[16] = "unhidden: live update, visible or not a hidden block";
+    }
+
+    private static int tick() {
+        MinecraftServer current = server;
+        return current == null ? 0 : current.getTickCount();
+    }
+
+    private static void trace(PlayerHidden state, long pos, int event) {
+        it.unimi.dsi.fastutil.longs.Long2LongMap map = state.trace;
+        if (map != null) {
+            synchronized (map) {
+                map.put(pos, ((long) tick() << 8) | event);
+            }
+        }
+    }
+
+    public static boolean toggleTrace(ServerPlayer player) {
+        PlayerHidden state = HIDDEN.computeIfAbsent(player.getUUID(), k -> new PlayerHidden());
+        if (state.trace != null) {
+            state.trace = null;
+            return false;
+        }
+        state.traceDrops.clear();
+        state.traceClear = -1;
+        state.trace = new it.unimi.dsi.fastutil.longs.Long2LongOpenHashMap();
+        return true;
+    }
+
+    private static String traceOf(PlayerHidden state, long chunkKey, long pos) {
+        if (state == null || state.trace == null) {
+            return " | history: trace is off (/antifreecam trace)";
+        }
+        int now = tick();
+        long value;
+        synchronized (state.trace) {
+            value = state.trace.getOrDefault(pos, -1L);
+        }
+        String history = value < 0 ? "nothing recorded" : TRACE_EVENTS[(int) (value & 0xFF)] + " " + (now - (int) (value >> 8)) + " ticks ago";
+        Integer drop = state.traceDrops.get(chunkKey);
+        return " | history: " + history
+            + " | chunk forgotten: " + (drop == null ? "no" : (now - drop) + " ticks ago")
+            + " | lists cleared: " + (state.traceClear < 0 ? "no" : (now - state.traceClear) + " ticks ago");
     }
 
     // fill-structures: id of a structure for "opened for this player" - the corner of its box
@@ -233,12 +300,14 @@ public final class BlockReveal {
             + " | near: " + (isNear(player, controller, pos) ? "yes" : "no")
             + " | chunk waiting to be sent: " + (player.connection.chunkSender.isPending(chunkKey) ? "yes" : "no")
             + " | replaced in this chunk: " + (list == null ? 0 : list.length)
-            + " | world of the lists: " + (state == null || state.dimension == null ? "none" : state.dimension.toString());
+            + " | world of the lists: " + (state == null || state.dimension == null ? "none" : state.dimension.toString())
+            + traceOf(state, chunkKey, packed);
     }
 
     public static void dropChunk(UUID viewer, long chunk) {
         PlayerHidden state = HIDDEN.get(viewer);
         if (state != null) {
+            if (state.trace != null) state.traceDrops.put(chunk, tick());
             state.chunks.remove(chunk);
             state.filled.remove(chunk);
             for (int i = 0; i < PASSES; i++) {
@@ -485,6 +554,7 @@ public final class BlockReveal {
             if (visible) {
                 if (revealed == null) revealed = new boolean[positions.length];
                 revealed[i] = true;
+                trace(state, packed, near ? 10 : 11);
                 reveal(player, level, x, y, z);
                 if (contains(state.filled, chunkKey, packed)) {
                     // a filled structure opens whole (its chunks come again); a filled room - around the seen cell
@@ -589,6 +659,7 @@ public final class BlockReveal {
                 if (isHiddenPos(state, chunkKey, packed)) {
                     boolean filled = contains(state.filled, chunkKey, packed);
                     removeHiddenPos(state, chunkKey, packed);
+                    trace(state, packed, 14);
                     reveal(player, level, x, y, z);
                     if (filled && !(controller.rtFillsStructures() && unlockStructure(player, level, controller, state, x, y, z))) {
                         floodReveal(player, level, controller, state, chunkKey, null, null, packed);
@@ -645,6 +716,7 @@ public final class BlockReveal {
                 LevelChunk chunk = level.getChunkSource().getChunkNow(pos.getX() >> 4, pos.getZ() >> 4);
                 // through every filled cell that isn't a full block (air, and in filled structures also water, sculk veins...)
                 if (chunk == null || controller.rtOccludes(chunk.getBlockState(pos))) continue;
+                trace(state, next, 12);
                 reveal(player, level, pos.getX(), pos.getY(), pos.getZ());
                 count++;
                 if (positions != null && nextChunk == chunkKey) {
@@ -706,6 +778,7 @@ public final class BlockReveal {
                 } else {
                     removeHiddenPos(state, nextChunk, packed);
                 }
+                trace(state, packed, 13);
                 reveal(player, level, next.getX(), next.getY(), next.getZ());
                 count++;
             }
@@ -825,6 +898,7 @@ public final class BlockReveal {
                 // the client keeps old data (sign text) - mark it, so the reveal sends the new data when it gets visible
                 BlockPos pos = data.getPos();
                 addHiddenPos(state, ChunkPos.pack(pos.getX() >> 4, pos.getZ() >> 4), pos.asLong());
+                trace(state, pos.asLong(), 3);
                 return true;
             }
             if (packet instanceof ClientboundBlockEventPacket event) {
@@ -873,6 +947,7 @@ public final class BlockReveal {
         long packed = pos.asLong();
         if (chunk == null || isNear(player, controller, pos)) {
             removeHiddenPos(state, chunkKey, packed);
+            trace(state, packed, 15);
             return null;
         }
         // a filled cell (pocket, building or structure) stays solid on the client, whatever happens there (block broken ->
@@ -881,9 +956,11 @@ public final class BlockReveal {
         if (!filledCell && !controller.rtShouldHideAt(chunk, blockState, pos.getX(), pos.getY(), pos.getZ())
             || isVisibleNow(player, level, controller, pos)) {
             removeHiddenPos(state, chunkKey, packed);
+            trace(state, packed, 16);
             return null;
         }
         addHiddenPos(state, chunkKey, packed);
+        trace(state, packed, 2);
         return filledCell || controller.rtSolidAsRock(blockState) ? controller.rtFillAt(chunk, pos) : controller.rtReplacementAt(chunk, pos);
     }
 

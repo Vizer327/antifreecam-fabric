@@ -50,6 +50,13 @@ public final class AntiFreecamCommand {
                         .executes(ctx -> pocket(ctx, ctx.getSource().getLevel(), ctx.getSource().getPlayerOrException().blockPosition()))
                         .then(Commands.argument("pos", BlockPosArgument.blockPos())
                                 .executes(ctx -> pocket(ctx, ctx.getSource().getLevel(), BlockPosArgument.getBlockPos(ctx, "pos")))))
+                .then(Commands.literal("trace").executes(ctx -> {
+                    boolean on = BlockReveal.toggleTrace(ctx.getSource().getPlayerOrException());
+                    ctx.getSource().sendSuccess(() -> Component.literal(on
+                            ? "Trace on: every replaced / revealed position of yours is recorded (see /antifreecam block). Resend your chunks: /antifreecam resend"
+                            : "Trace off"), false);
+                    return on ? 1 : 0;
+                }))
                 .then(Commands.literal("block")
                         .then(Commands.argument("pos", BlockPosArgument.blockPos())
                                 .executes(ctx -> block(ctx, ctx.getSource().getPlayerOrException(), BlockPosArgument.getBlockPos(ctx, "pos")))))
