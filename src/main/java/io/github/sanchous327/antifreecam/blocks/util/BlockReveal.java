@@ -369,6 +369,8 @@ public final class BlockReveal {
             state.lastPitch = player.getXRot();
         }
         net.minecraft.world.phys.Vec3 look = player.getLookAngle();
+        // what the player really sees opens first, whatever the length of the lists
+        viewRays(player, level, controller, state, ex, ey, ez, look, maxDistance);
 
         LongArrayList keys = new LongArrayList();
         for (Long key : state.chunks.keySet()) {
@@ -492,6 +494,100 @@ public final class BlockReveal {
         return budget;
     }
 
+    // View rays: every tick rays from the eyes in random directions inside the field of view walk the REAL world; a
+    // hidden block one of them reaches (the first full block it hits, and thin or filled cells on the way) is what the
+    // player really sees - it opens at once. In a huge build (an ancient city has a million hidden blocks) the per-block
+    // scan reaches the block in front of the eyes only after seconds; with these the screen fills in a few ticks.
+    private static final int VIEW_RAYS = 256;
+    // half of the sampled field of view: ~51 degrees to the sides, ~39 degrees up and down (tangents)
+    private static final double VIEW_TAN_H = 1.25;
+    private static final double VIEW_TAN_V = 0.8;
+
+    private static void viewRays(ServerPlayer player, ServerLevel level, ChunkPacketBlockControllerAntiXray controller,
+                                 PlayerHidden state, double ex, double ey, double ez, net.minecraft.world.phys.Vec3 look,
+                                 int maxDistance) {
+        double lx = look.x, ly = look.y, lz = look.z;
+        // right = look x (0, 1, 0); straight up or down - any horizontal direction
+        double rx = -lz, rz = lx;
+        double rl = Math.sqrt(rx * rx + rz * rz);
+        if (rl < 1.0E-4) {
+            rx = 1;
+            rz = 0;
+            rl = 1;
+        }
+        rx /= rl;
+        rz /= rl;
+        // up = right x look
+        double ux = -rz * ly, uy = rz * lx - rx * lz, uz = rx * ly;
+        java.util.concurrent.ThreadLocalRandom random = java.util.concurrent.ThreadLocalRandom.current();
+        BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
+        for (int n = 0; n < VIEW_RAYS; n++) {
+            double a = (random.nextDouble() * 2 - 1) * VIEW_TAN_H;
+            double b = (random.nextDouble() * 2 - 1) * VIEW_TAN_V;
+            double dx = lx + rx * a + ux * b;
+            double dy = ly + uy * b;
+            double dz = lz + rz * a + uz * b;
+            double length = Math.sqrt(dx * dx + dy * dy + dz * dz);
+            viewRay(player, level, controller, state, ex, ey, ez, dx / length, dy / length, dz / length, maxDistance, pos);
+        }
+    }
+
+    // One view ray (Amanatides & Woo, unit direction): reveals the hidden cells it passes and stops at the first real full block
+    private static void viewRay(ServerPlayer player, ServerLevel level, ChunkPacketBlockControllerAntiXray controller,
+                                PlayerHidden state, double sx, double sy, double sz, double dx, double dy, double dz,
+                                int maxDistance, BlockPos.MutableBlockPos pos) {
+        int x = (int) Math.floor(sx);
+        int y = (int) Math.floor(sy);
+        int z = (int) Math.floor(sz);
+        int stepX = dx > 0 ? 1 : dx < 0 ? -1 : 0;
+        int stepY = dy > 0 ? 1 : dy < 0 ? -1 : 0;
+        int stepZ = dz > 0 ? 1 : dz < 0 ? -1 : 0;
+        double tDeltaX = stepX != 0 ? Math.abs(1.0 / dx) : Double.MAX_VALUE;
+        double tDeltaY = stepY != 0 ? Math.abs(1.0 / dy) : Double.MAX_VALUE;
+        double tDeltaZ = stepZ != 0 ? Math.abs(1.0 / dz) : Double.MAX_VALUE;
+        double tMaxX = stepX > 0 ? (x + 1 - sx) / dx : stepX < 0 ? (sx - x) / -dx : Double.MAX_VALUE;
+        double tMaxY = stepY > 0 ? (y + 1 - sy) / dy : stepY < 0 ? (sy - y) / -dy : Double.MAX_VALUE;
+        double tMaxZ = stepZ > 0 ? (z + 1 - sz) / dz : stepZ < 0 ? (sz - z) / -dz : Double.MAX_VALUE;
+        LevelChunk chunk = null;
+        for (int step = 0; step < MAX_RAY_STEPS * 2; step++) {
+            if (step > 0) {
+                if (chunk == null || chunk.getPos().x() != x >> 4 || chunk.getPos().z() != z >> 4) {
+                    chunk = level.getChunkSource().getChunkNow(x >> 4, z >> 4);
+                    if (chunk == null) {
+                        return;
+                    }
+                }
+                long chunkKey = ChunkPos.pack(x >> 4, z >> 4);
+                long packed = BlockPos.asLong(x, y, z);
+                if (isHiddenPos(state, chunkKey, packed)) {
+                    boolean filled = contains(state.filled, chunkKey, packed);
+                    removeHiddenPos(state, chunkKey, packed);
+                    reveal(player, level, x, y, z);
+                    if (filled && !(controller.rtFillsStructures() && unlockStructure(player, level, controller, state, x, y, z))) {
+                        floodReveal(player, level, controller, state, chunkKey, null, null, packed);
+                    }
+                }
+                if (controller.rtOccludes(chunk.getBlockState(pos.set(x, y, z)))) {
+                    return; // the first real full block - nothing behind it is seen
+                }
+            }
+            double next = Math.min(tMaxX, Math.min(tMaxY, tMaxZ));
+            if (next > maxDistance) {
+                return;
+            }
+            if (tMaxX < tMaxY && tMaxX < tMaxZ) {
+                x += stepX;
+                tMaxX += tDeltaX;
+            } else if (tMaxY < tMaxZ) {
+                y += stepY;
+                tMaxY += tDeltaY;
+            } else {
+                z += stepZ;
+                tMaxZ += tDeltaZ;
+            }
+        }
+    }
+
     private static final int FLOOD_MAX = 8192;
     // a filled room opens within this many blocks of the seen cell: a huge filled structure (fill-structures) must
     // not open whole - with all its corridors - from one look through a doorway
@@ -524,7 +620,7 @@ public final class BlockReveal {
                 if (chunk == null || controller.rtOccludes(chunk.getBlockState(pos))) continue;
                 reveal(player, level, pos.getX(), pos.getY(), pos.getZ());
                 count++;
-                if (nextChunk == chunkKey) {
+                if (positions != null && nextChunk == chunkKey) {
                     int index = Arrays.binarySearch(positions, next);
                     if (index >= 0) {
                         revealed[index] = true;
