@@ -41,6 +41,8 @@ public class WorldConfig {
     public int fillMaxPocket = 2048;
     // structures whose pieces are filled whole until seen (ids like "minecraft:ancient_city"); empty = off
     public List<String> fillStructures = List.of();
+    // players with this scoreboard tag get every block change as it is (a datapack building something around them)
+    public String exemptTag = "";
     public int nearRadius = 16;
     public int revealDistance = 48;
     public Set<Block> hiddenBlocks = new HashSet<>();
@@ -71,6 +73,7 @@ public class WorldConfig {
         this.fillBuilds = blocks.getBoolean("fill-builds", this.fillBuilds);
         this.fillMaxPocket = blocks.getInt("fill-max-pocket", this.fillMaxPocket);
         this.fillStructures = blocks.getStringList("fill-structures", this.fillStructures);
+        this.exemptTag = blocks.getString("exempt-tag", this.exemptTag);
         this.nearRadius = blocks.getInt("near-radius", this.nearRadius);
         this.revealDistance = blocks.getInt("reveal-distance", this.revealDistance);
         this.hiddenBlocks = parseBlocks(blocks.getStringList("hidden", List.of()));
@@ -152,6 +155,7 @@ public class WorldConfig {
                 this.nearRadius, this.revealDistance);
             controller.rtConfigureFill(this.fillPockets, this.fillEmptyPockets, this.fillBuilds, this.fillMaxPocket);
             controller.rtConfigureStructures(new HashSet<>(this.fillStructures));
+            controller.rtConfigureExemptTag(this.exemptTag);
         }
         return controller;
     }

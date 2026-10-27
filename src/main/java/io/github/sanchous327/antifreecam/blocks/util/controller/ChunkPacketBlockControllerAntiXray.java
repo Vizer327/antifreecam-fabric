@@ -440,6 +440,17 @@ public abstract class ChunkPacketBlockControllerAntiXray implements ChunkPacketB
         this.rtStructures = structures;
     }
 
+    // [blocks] exempt-tag: block changes reach players with this tag as they are
+    private String rtExemptTag = "";
+
+    public void rtConfigureExemptTag(String tag) {
+        this.rtExemptTag = tag == null ? "" : tag;
+    }
+
+    public boolean rtExempt(ServerPlayer player) {
+        return !this.rtExemptTag.isEmpty() && player.entityTags().contains(this.rtExemptTag);
+    }
+
     public void rtConfigureFill(boolean fill, boolean fillEmpty, boolean fillBuilds, int maxPocket) {
         this.rtFillBuildsOn = fill && fillBuilds;
         this.rtFill = fill;

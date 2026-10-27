@@ -1056,6 +1056,9 @@ public final class BlockReveal {
         if (!(Util.getBlockController(level) instanceof ChunkPacketBlockControllerAntiXray controller) || !controller.rtEnabled()) {
             return false;
         }
+        if (controller.rtExempt(player)) {
+            return false; // [blocks] exempt-tag: something is being built around him by a datapack
+        }
         if (packetBudgetTick != server.getTickCount()) {
             packetBudgetTick = server.getTickCount();
             packetBudget = PACKET_RAY_BUDGET_PER_TICK;
@@ -1166,7 +1169,8 @@ public final class BlockReveal {
         }
         addHiddenPos(state, chunkKey, packed);
         trace(state, packed, 2);
-        return filledCell || controller.rtSolidAsRock(blockState) ? controller.rtFillAt(chunk, pos) : controller.rtReplacementAt(chunk, pos);
+        // like in chunk packets: open to air - air, else the surrounding rock (a filled cell - the fill's rock)
+        return filledCell ? controller.rtFillAt(chunk, pos) : controller.rtReplacementAt(chunk, pos);
     }
 
     // Must a packet about this position be kept from the player (its block is hidden on his client or would be)

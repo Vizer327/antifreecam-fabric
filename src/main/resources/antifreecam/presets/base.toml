@@ -79,6 +79,9 @@ fill-max-pocket = 2048
 # around them - is sent as rock (ids, for example "minecraft:ancient_city", "minecraft:trial_chambers",
 # "minecraft:stronghold", "minecraft:mineshaft"). It opens as players look at it. Works without fill-pockets. Empty = off
 fill-structures = []
+# Players with this scoreboard tag get every block change as it is, not hidden (for a datapack that builds
+# something around a player underground, like a room he is teleported into). Chunks are not affected. Empty = off
+exempt-tag = ""
 # Never hidden this close to the player's eyes (blocks)
 near-radius = 16
 # Hidden blocks farther than this are not revealed even when visible (blocks). More = more raycasts.
