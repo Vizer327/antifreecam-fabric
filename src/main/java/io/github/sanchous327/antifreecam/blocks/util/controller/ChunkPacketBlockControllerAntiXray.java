@@ -135,7 +135,7 @@ public abstract class ChunkPacketBlockControllerAntiXray implements ChunkPacketB
             antiXrayInfo.setAreaChunks(area);
         }
         if (this.rtOn && !this.rtStructures.isEmpty()) {
-            antiXrayInfo.setStructureBoxes(rtStructureBoxes((ServerLevel) chunk.getLevel(), chunkCache, chunk));
+            antiXrayInfo.setStructureBoxes(rtStructureBoxes((ServerLevel) chunk.getLevel(), chunkCache, chunk, antiXrayInfo.rtViewer()));
         }
         Util.backgroundExecutor().execute((Runnable) chunkPacketInfo);
     }
@@ -145,7 +145,7 @@ public abstract class ChunkPacketBlockControllerAntiXray implements ChunkPacketB
     // air inside the structure's box (rooms, the cave and the pockets around them) is filled. The start of a structure
     // lives in its start chunk - only an already loaded one is read (never loads or generates a chunk), a structure
     // whose start chunk isn't loaded just isn't filled here this time
-    private BoundingBox[] rtStructureBoxes(ServerLevel level, ServerChunkCache chunkCache, LevelChunk chunk) {
+    private BoundingBox[] rtStructureBoxes(ServerLevel level, ServerChunkCache chunkCache, LevelChunk chunk, java.util.UUID viewer) {
         java.util.Map<Structure, it.unimi.dsi.fastutil.longs.LongSet> references = chunk.getAllReferences();
         if (references.isEmpty()) {
             return null;
@@ -171,13 +171,48 @@ public abstract class ChunkPacketBlockControllerAntiXray implements ChunkPacketB
                     continue;
                 }
                 BoundingBox box = start.getBoundingBox();
-                if (box.intersects(minX, minZ, maxX, maxZ)) {
+                // a structure this player has already seen comes without the fill (BlockReveal.unlockStructure)
+                if (box.intersects(minX, minZ, maxX, maxZ)
+                    && !io.github.sanchous327.antifreecam.blocks.util.BlockReveal.isUnlocked(viewer, io.github.sanchous327.antifreecam.blocks.util.BlockReveal.structureKey(box))) {
                     if (boxes == null) boxes = new java.util.ArrayList<>();
                     boxes.add(box);
                 }
             }
         }
         return boxes == null ? null : boxes.toArray(new BoundingBox[0]);
+    }
+
+    // fill-structures (server thread): the box of a listed structure this position is in that the viewer hasn't opened yet
+    // (structures can overlap), or null. Only already loaded chunks are read, like when filling
+    public BoundingBox rtStructureBoxAt(ServerLevel level, BlockPos pos, java.util.UUID viewer) {
+        if (this.rtStructures.isEmpty()) {
+            return null;
+        }
+        ServerChunkCache chunkCache = level.getChunkSource();
+        LevelChunk chunk = chunkCache.getChunkNow(pos.getX() >> 4, pos.getZ() >> 4);
+        if (chunk == null) {
+            return null;
+        }
+        net.minecraft.core.Registry<Structure> registry = level.registryAccess().lookupOrThrow(Registries.STRUCTURE);
+        for (java.util.Map.Entry<Structure, it.unimi.dsi.fastutil.longs.LongSet> entry : chunk.getAllReferences().entrySet()) {
+            net.minecraft.resources.Identifier id = registry.getKey(entry.getKey());
+            if (id == null || !this.rtStructures.contains(id.toString())) {
+                continue;
+            }
+            for (long startChunk : entry.getValue()) {
+                ChunkAccess startAccess = rtLoadedChunk(chunkCache, ChunkPos.getX(startChunk), ChunkPos.getZ(startChunk));
+                StructureStart start = startAccess == null ? null : startAccess.getStartForStructure(entry.getKey());
+                if (start != null && start.isValid() && start.getBoundingBox().isInside(pos)
+                    && !io.github.sanchous327.antifreecam.blocks.util.BlockReveal.isUnlocked(viewer, io.github.sanchous327.antifreecam.blocks.util.BlockReveal.structureKey(start.getBoundingBox()))) {
+                    return start.getBoundingBox();
+                }
+            }
+        }
+        return null;
+    }
+
+    public boolean rtFillsStructures() {
+        return this.rtOn && !this.rtStructures.isEmpty();
     }
 
     private static ChunkAccess rtLoadedChunk(ServerChunkCache chunkCache, int chunkX, int chunkZ) {

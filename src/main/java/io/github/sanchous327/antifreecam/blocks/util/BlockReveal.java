@@ -65,10 +65,13 @@ public final class BlockReveal {
         }
         double lastX, lastY, lastZ;
         float lastYaw, lastPitch;
+        // fill-structures: structures this player has seen (structureKey of their box) - their chunks come without the fill
+        final java.util.Set<Long> unlocked = ConcurrentHashMap.newKeySet();
 
         void clear() {
             chunks.clear();
             filled.clear();
+            unlocked.clear();
             forget();
             dropCursors();
         }
@@ -162,6 +165,47 @@ public final class BlockReveal {
             count += positions.length;
         }
         return count;
+    }
+
+    // fill-structures: id of a structure for "opened for this player" - the corner of its box
+    public static long structureKey(net.minecraft.world.level.levelgen.structure.BoundingBox box) {
+        return BlockPos.asLong(box.minX(), box.minY(), box.minZ());
+    }
+
+    // fill-structures: this structure was seen by the player - send it to him without the fill (packet thread reads it)
+    public static boolean isUnlocked(UUID viewer, long structureKey) {
+        PlayerHidden state = viewer == null ? null : HIDDEN.get(viewer);
+        return state != null && state.unlocked.contains(structureKey);
+    }
+
+    // A filled cell of a listed structure was really seen: the whole structure opens for this player at once - the fill in
+    // reverse. Its chunks the player has are sent again without its fill (a chunk packet each, not a block update per
+    // cell - a structure has hundreds of thousands of them). Returns false if the cell isn't in a filled structure.
+    private static boolean unlockStructure(ServerPlayer player, ServerLevel level, ChunkPacketBlockControllerAntiXray controller,
+                                           PlayerHidden state, int x, int y, int z) {
+        net.minecraft.world.level.levelgen.structure.BoundingBox box = controller.rtStructureBoxAt(level, new BlockPos(x, y, z), player.getUUID());
+        if (box == null) {
+            return false;
+        }
+        if (!state.unlocked.add(structureKey(box))) {
+            return true; // already opened - the new chunks are on their way
+        }
+        for (int cx = box.minX() >> 4; cx <= box.maxX() >> 4; cx++) {
+            for (int cz = box.minZ() >> 4; cz <= box.maxZ() >> 4; cz++) {
+                if (!player.getChunkTrackingView().contains(cx, cz)) {
+                    continue;
+                }
+                LevelChunk chunk = level.getChunkSource().getChunkNow(cx, cz);
+                if (chunk == null) {
+                    continue;
+                }
+                // the new packet brings its own lists - the old ones (the fill) would only cost rays
+                dropChunk(player.getUUID(), ChunkPos.pack(cx, cz));
+                // the client keeps the chunk until the new one replaces it - no hole in the world meanwhile
+                player.connection.chunkSender.markChunkPendingToSend(chunk);
+            }
+        }
+        return true;
     }
 
     public static void dropChunk(UUID viewer, long chunk) {
@@ -413,7 +457,10 @@ public final class BlockReveal {
                 revealed[i] = true;
                 reveal(player, level, x, y, z);
                 if (contains(state.filled, chunkKey, packed)) {
-                    budget -= floodReveal(player, level, controller, state, chunkKey, positions, revealed, packed);
+                    // a filled structure opens whole (its chunks come again); a filled room - around the seen cell
+                    if (!controller.rtFillsStructures() || !unlockStructure(player, level, controller, state, x, y, z)) {
+                        budget -= floodReveal(player, level, controller, state, chunkKey, positions, revealed, packed);
+                    }
                 } else if (!near) {
                     budget -= spreadReveal(player, level, controller, state, chunkKey, positions, revealed, x, y, z, ex, ey, ez) / 4;
                 }
