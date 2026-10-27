@@ -76,7 +76,7 @@ fill-empty-pockets = false
 fill-builds = false
 fill-max-pocket = 2048
 # Never hidden this close to the player's eyes (blocks)
-near-radius = 12
+near-radius = 16
 # Hidden blocks farther than this are not revealed even when visible (blocks). More = more raycasts.
 reveal-distance = 48
 # blacklist mode: what is hidden
@@ -94,7 +94,7 @@ visible = [
     "#minecraft:terracotta", "#minecraft:ice", "snow", "oak_leaves", "spruce_leaves", "birch_leaves",
     "jungle_leaves", "acacia_leaves", "dark_oak_leaves", "pale_oak_leaves", "azalea_leaves",
     "flowering_azalea_leaves", "cherry_leaves", "red_poplar_leaves", "orange_poplar_leaves", "yellow_poplar_leaves",
-    "oak_log", "spruce_log", "birch_log", "jungle_log", "acacia_log", "dark_oak_log", "pale_oak_log", "cherry_log",
+    "spruce_log", "birch_log", "jungle_log", "acacia_log", "dark_oak_log", "pale_oak_log", "cherry_log",
     "poplar_log", "crimson_stem", "warped_stem", "#minecraft:flowers", "oak_sapling", "spruce_sapling",
     "birch_sapling", "jungle_sapling", "acacia_sapling", "dark_oak_sapling", "pale_oak_sapling", "cherry_sapling",
     "poplar_sapling", "#minecraft:replaceable", "#minecraft:corals", "#minecraft:coral_blocks",
@@ -102,7 +102,7 @@ visible = [
     "podzol", "mycelium", "mud", "moss_block", "pale_moss_block", "moss_carpet", "pale_moss_carpet", "clay",
     "gravel", "suspicious_gravel", "suspicious_sand", "sandstone", "red_sandstone", "bedrock", "water", "lava",
     "bubble_column", "obsidian", "magma_block", "calcite", "dripstone_block", "pointed_dripstone", "smooth_basalt",
-    "soul_sand", "soul_soil", "glowstone", "packed_ice", "blue_ice", "snow_block", "brown_mushroom", "red_mushroom",
+    "soul_soil", "glowstone", "packed_ice", "blue_ice", "snow_block", "brown_mushroom", "red_mushroom",
     "brown_mushroom_block", "red_mushroom_block", "mushroom_stem", "sugar_cane", "kelp", "kelp_plant", "seagrass",
     "tall_seagrass", "sea_pickle", "lily_pad", "bamboo", "big_dripleaf", "big_dripleaf_stem", "small_dripleaf",
     "spore_blossom", "hanging_roots", "azalea", "flowering_azalea", "glow_lichen", "vine", "sweet_berry_bush",

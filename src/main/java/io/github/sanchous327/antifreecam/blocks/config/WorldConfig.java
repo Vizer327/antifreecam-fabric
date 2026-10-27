@@ -39,7 +39,7 @@ public class WorldConfig {
     public boolean fillEmptyPockets = false;
     public boolean fillBuilds = false;
     public int fillMaxPocket = 2048;
-    public int nearRadius = 12;
+    public int nearRadius = 16;
     public int revealDistance = 48;
     public Set<Block> hiddenBlocks = new HashSet<>();
     public Set<Block> visibleBlocks = new HashSet<>();
