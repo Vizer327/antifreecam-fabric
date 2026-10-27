@@ -209,6 +209,8 @@ public final class BlockReveal {
         TRACE_EVENTS[20] = "second send: sent";
         TRACE_EVENTS[21] = "second send: skipped, hidden again";
         TRACE_EVENTS[22] = "second send: skipped, chunk not the player's";
+        TRACE_EVENTS[24] = "block update sent to the client: air";
+        TRACE_EVENTS[25] = "block update sent to the client: a block";
         TRACE_EVENTS[30] = "chunk packet listed";
         TRACE_EVENTS[31] = "chunk forgotten";
         TRACE_EVENTS[32] = "chunk packet sent to the client";
@@ -294,6 +296,14 @@ public final class BlockReveal {
         state.unsent.computeIfPresent(chunk, (k, v) -> v[0] <= 1 ? null : new int[]{v[0] - 1, v[1]});
         state.recheck(chunk);
         traceChunk(state, chunk, 32, 0);
+    }
+
+    // /antifreecam trace: a block update really left the server for this player
+    public static void blockSent(UUID viewer, BlockPos pos, BlockState sent) {
+        PlayerHidden state = HIDDEN.get(viewer);
+        if (state != null && state.trace != null) {
+            trace(state, pos.asLong(), sent.isAir() ? 24 : 25);
+        }
     }
 
     // The client doesn't have this chunk's last packet yet: a block sent now would reach him before the chunk and be

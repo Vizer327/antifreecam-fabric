@@ -54,6 +54,9 @@ public abstract class ConnectionMixin {
             && ((Connection) (Object) this).getPacketListener() instanceof net.minecraft.server.network.ServerGamePacketListenerImpl listener) {
             io.github.sanchous327.antifreecam.blocks.util.BlockReveal.chunkSent(listener.player.getUUID(),
                 net.minecraft.world.level.ChunkPos.pack(chunkPacket.x(), chunkPacket.z()));
+        } else if (packet instanceof net.minecraft.network.protocol.game.ClientboundBlockUpdatePacket update
+            && ((Connection) (Object) this).getPacketListener() instanceof net.minecraft.server.network.ServerGamePacketListenerImpl listener) {
+            io.github.sanchous327.antifreecam.blocks.util.BlockReveal.blockSent(listener.player.getUUID(), update.getPos(), update.getBlockState());
         }
     }
 
