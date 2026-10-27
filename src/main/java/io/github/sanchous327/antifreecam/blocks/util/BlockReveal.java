@@ -70,12 +70,21 @@ public final class BlockReveal {
             chunks.clear();
             filled.clear();
             forget();
+            dropCursors();
         }
 
+        // moved or turned: everything may look different now - check all lists again, but continue from where the
+        // scan stopped (restarting at the first positions on every step spent the rays on the same nearby walls over
+        // and over, and the far part of a cave was never reached while the player moved)
         void forget() {
             for (int i = 0; i < PASSES; i++) {
-                cursor[i].clear();
                 checked[i].clear();
+            }
+        }
+
+        void dropCursors() {
+            for (int i = 0; i < PASSES; i++) {
+                cursor[i].clear();
             }
         }
 
@@ -282,6 +291,8 @@ public final class BlockReveal {
     private static final double RING_2 = 32;
     // passes: in front of the eyes ring 1, 2, 3, then behind / to the side ring 1, 2, 3
     private static final int PASSES = 6;
+    // share of the tick's rays per pass (in front: near, middle, far; then behind / to the side)
+    private static final double[] PASS_SHARE = {0.30, 0.25, 0.25, 0.10, 0.05, 0.05};
 
     // Six passes: what is in front of the eyes - closest first - is what the player is looking at right now, the
     // rest gets the rays left. Closest chunks first; a chunk the budget ran out in continues from there next tick.
@@ -318,15 +329,23 @@ public final class BlockReveal {
         }
         keys.sort((a, b) -> Integer.compare(chunkDistance(a, pcx, pcz), chunkDistance(b, pcx, pcz)));
 
+        // every pass gets its share of the rays each tick (what it doesn't use goes on to the next one), so the far
+        // part of a big cave in front of the eyes is checked too, not only the nearby walls
+        int total = budget;
+        int carry = 0;
         for (int pass = 0; pass < PASSES; pass++) {
-            for (int k = 0; k < keys.size() && budget > 0; k++) {
+            int passBudget = pass == PASSES - 1 ? budget : Math.min(budget, (int) (total * PASS_SHARE[pass]) + carry);
+            int before = passBudget;
+            for (int k = 0; k < keys.size() && passBudget > 0; k++) {
                 long chunkKey = keys.getLong(k);
                 Integer checkedAt = state.checked[pass].get(chunkKey);
                 if (checkedAt != null && tick - checkedAt < RECHECK_TICKS) {
                     continue;
                 }
-                budget = scanChunk(player, level, controller, state, chunkKey, pass, look, ex, ey, ez, tick, budget);
+                passBudget = scanChunk(player, level, controller, state, chunkKey, pass, look, ex, ey, ez, tick, passBudget);
             }
+            budget -= before - passBudget;
+            carry = passBudget;
         }
         return budget;
     }
