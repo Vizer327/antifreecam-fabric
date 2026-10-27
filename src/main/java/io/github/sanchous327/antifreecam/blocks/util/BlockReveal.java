@@ -289,13 +289,17 @@ public final class BlockReveal {
     // distance rings of the passes (blocks); the last ring is up to reveal-distance
     private static final double RING_1 = 16;
     private static final double RING_2 = 32;
-    // passes: in front of the eyes ring 1, 2, 3, then behind / to the side ring 1, 2, 3
-    private static final int PASSES = 6;
-    // share of the tick's rays per pass (in front: near, middle, far; then behind / to the side)
-    private static final double[] PASS_SHARE = {0.30, 0.25, 0.25, 0.10, 0.05, 0.05};
+    // passes: around the crosshair (any distance), in front of the eyes ring 1, 2, 3, then behind / to the side ring 1, 2, 3
+    private static final int PASSES = 7;
+    // share of the tick's rays per pass (crosshair; in front: near, middle, far; then behind / to the side)
+    private static final double[] PASS_SHARE = {0.35, 0.20, 0.12, 0.13, 0.08, 0.06, 0.06};
+    // around the crosshair (~32 degrees): checked first at any distance - what the player looks at opens first, not
+    // after thousands of hidden blocks to the side (a big build like an ancient city)
+    private static final double AIM_COS = 0.85;
 
-    // Six passes: what is in front of the eyes - closest first - is what the player is looking at right now, the
-    // rest gets the rays left. Closest chunks first; a chunk the budget ran out in continues from there next tick.
+    // Seven passes: around the crosshair first, then in front of the eyes - closest first - is what the player is
+    // looking at right now, the rest gets the rays left. Closest chunks first; a chunk the budget ran out in
+    // continues from there next tick.
     private static int revealFor(ServerPlayer player, ServerLevel level, ChunkPacketBlockControllerAntiXray controller, PlayerHidden state, int budget) {
         double ex = player.getX();
         double ey = player.getEyeY();
@@ -310,8 +314,8 @@ public final class BlockReveal {
         double my = ey - state.lastY;
         double mz = ez - state.lastZ;
         if (mx * mx + my * my + mz * mz > 0.25
-            || Math.abs(net.minecraft.util.Mth.wrapDegrees(player.getYRot() - state.lastYaw)) > 10
-            || Math.abs(player.getXRot() - state.lastPitch) > 10) {
+            || Math.abs(net.minecraft.util.Mth.wrapDegrees(player.getYRot() - state.lastYaw)) > 5
+            || Math.abs(player.getXRot() - state.lastPitch) > 5) {
             state.forget();
             state.lastX = ex;
             state.lastY = ey;
@@ -380,9 +384,13 @@ public final class BlockReveal {
                 continue;
             }
             boolean near = distanceSq <= nearSq;
-            boolean inFront = near || (dx * look.x + dy * look.y + dz * look.z) > CONE_COS * Math.sqrt(distanceSq);
+            double dot = dx * look.x + dy * look.y + dz * look.z;
+            double distance = Math.sqrt(distanceSq);
+            boolean aim = !near && dot > AIM_COS * distance;
+            boolean inFront = near || dot > CONE_COS * distance;
             int ring = distanceSq <= RING_1 * RING_1 ? 0 : distanceSq <= RING_2 * RING_2 ? 1 : 2;
-            if ((inFront ? 0 : 3) + ring != pass) {
+            int blockPass = aim ? 0 : (inFront ? 1 : 4) + ring;
+            if (blockPass != pass) {
                 continue; // another pass takes it
             }
             boolean visible;
