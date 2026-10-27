@@ -84,6 +84,10 @@ public abstract class ClientboundLevelChunkPacketDataMixin {
     )
     private static void setChunkSectionIndexArgument(LevelChunkSection instance, FriendlyByteBuf friendlyByteBuf, Operation<Void> original, @Share("chunkSectionIndex") LocalIntRef chunkSectionIndexRef) {
         int chunkSectionIndex = chunkSectionIndexRef.get();
+        // the section starts with its non-air block count - block hiding fixes it after replacing blocks
+        if (Arguments.PACKET_INFO.isBound() && Arguments.PACKET_INFO.get() != null) {
+            Arguments.PACKET_INFO.get().setCountIndex(chunkSectionIndex, friendlyByteBuf.writerIndex());
+        }
 
         ScopedValue.where(Arguments.CHUNK_SECTION_INDEX, chunkSectionIndex).run(() -> original.call(instance, friendlyByteBuf));
 

@@ -10,6 +10,8 @@ public class ChunkPacketInfo<T> {
     private final int[] bits;
     private final Object[] palettes;
     private final int[] indexes;
+    // buffer index of each section's non-air block count (a short written before its block states), -1 = unknown
+    private final int[] countIndexes;
     private final Object[][] presetValues;
     private ClientboundLevelChunkWithLightPacket chunkPacket;
     private byte[] buffer;
@@ -46,6 +48,8 @@ public class ChunkPacketInfo<T> {
         bits = new int[sections];
         palettes = new Object[sections];
         indexes = new int[sections];
+        countIndexes = new int[sections];
+        java.util.Arrays.fill(countIndexes, -1);
         presetValues = new Object[sections][];
     }
 
@@ -84,6 +88,16 @@ public class ChunkPacketInfo<T> {
 
     public void setPalette(int chunkSectionIndex, Palette<T> palette) {
         palettes[chunkSectionIndex] = palette;
+    }
+
+    public int getCountIndex(int chunkSectionIndex) {
+        return chunkSectionIndex < countIndexes.length ? countIndexes[chunkSectionIndex] : -1;
+    }
+
+    public void setCountIndex(int chunkSectionIndex, int index) {
+        if (chunkSectionIndex < countIndexes.length) {
+            countIndexes[chunkSectionIndex] = index;
+        }
     }
 
     public int getIndex(int chunkSectionIndex) {

@@ -807,11 +807,14 @@ public abstract class ChunkPacketBlockControllerAntiXray implements ChunkPacketB
 
             writer.setBits(info.getBits(section));
             writer.setIndex(info.getIndex(section));
+            // change of the section's non-air block count by the replacements (air filled with rock, blocks gone to air)
+            int countDelta = 0;
             for (int i = 0; i < 4096; i++) {
                 int x = i & 15;
                 int z = (i >> 4) & 15;
                 int y = i >> 8;
                 if (sFill != null && sFill[i] && fillId >= 0) {
+                    countDelta += rtNonAir(palette, fillId) - (real[section][i] == null || real[section][i].isAir() ? 0 : 1);
                     writer.write(fillId);
                     hidden.add(BlockPos.asLong(baseX + x, baseY + y, baseZ + z));
                     filled.add(BlockPos.asLong(baseX + x, baseY + y, baseZ + z));
@@ -836,6 +839,7 @@ public abstract class ChunkPacketBlockControllerAntiXray implements ChunkPacketB
                         replacement = rtReplacement(sIds, sHide, x, y, z, fallback);
                     }
                     if (replacement >= 0) {
+                        countDelta += rtNonAir(palette, replacement) - (hiddenState == null || hiddenState.isAir() ? 0 : 1);
                         writer.write(replacement);
                         hidden.add(BlockPos.asLong(baseX + x, baseY + y, baseZ + z));
                         continue;
@@ -844,6 +848,9 @@ public abstract class ChunkPacketBlockControllerAntiXray implements ChunkPacketB
                 writer.skip();
             }
             writer.flush();
+            if (countDelta != 0) {
+                rtFixCount(info, section, countDelta);
+            }
         }
         io.github.sanchous327.antifreecam.blocks.util.BlockReveal.setHidden(info.rtViewer(), chunk.getLevel().dimension(), chunkKey, hidden.toLongArray(), filled.toLongArray());
     }
@@ -1462,6 +1469,26 @@ public abstract class ChunkPacketBlockControllerAntiXray implements ChunkPacketB
         } catch (RuntimeException e) {
             return null;
         }
+    }
+
+    private static int rtNonAir(Palette<BlockState> palette, int id) {
+        BlockState state = rtValueFor(palette, id);
+        return state == null || state.isAir() ? 0 : 1;
+    }
+
+    // The packet carries each section's count of non-air blocks before its block states. The client trusts it: a
+    // section counted as empty ignores every later "air here" update (LevelChunk.setBlockState returns early) - an all-air
+    // section filled with rock by us kept its rock forever as phantom blocks. Fix the count by the replacements made
+    private static void rtFixCount(ChunkPacketInfoAntiXray info, int section, int delta) {
+        int index = info.getCountIndex(section);
+        byte[] buffer = info.getBuffer();
+        if (index < 0 || buffer == null || index + 1 >= buffer.length) {
+            return;
+        }
+        int count = ((buffer[index] & 0xFF) << 8) | (buffer[index + 1] & 0xFF);
+        count = Math.max(0, Math.min(4096, count + delta));
+        buffer[index] = (byte) (count >> 8);
+        buffer[index + 1] = (byte) count;
     }
 
     private static int rtIdFor(Palette<BlockState> palette, BlockState state) {
